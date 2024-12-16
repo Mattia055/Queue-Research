@@ -1,0 +1,1 @@
+/usr/bin/g++ -g CMakeFiles/fsan.dir/src/main.cpp.o CMakeFiles/fsan.dir/src/benchmark/BenchmarkUtils.cpp.o CMakeFiles/fsan.dir/src/AdditionalWork.cpp.o -o fsan  -fsanitize=address

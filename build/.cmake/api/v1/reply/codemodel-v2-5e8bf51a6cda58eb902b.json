@@ -1,0 +1,78 @@
+{
+	"configurations" : 
+	[
+		{
+			"directories" : 
+			[
+				{
+					"build" : ".",
+					"jsonFile" : "directory-.-Debug-f5ebdc15457944623624.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.10"
+					},
+					"projectIndex" : 0,
+					"source" : ".",
+					"targetIndexes" : 
+					[
+						0,
+						1,
+						2
+					]
+				}
+			],
+			"name" : "Debug",
+			"projects" : 
+			[
+				{
+					"directoryIndexes" : 
+					[
+						0
+					],
+					"name" : "QueueBenchmark",
+					"targetIndexes" : 
+					[
+						0,
+						1,
+						2
+					]
+				}
+			],
+			"targets" : 
+			[
+				{
+					"directoryIndex" : 0,
+					"id" : "fsan::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-fsan-Debug-380fef6ad30b6d1d578a.json",
+					"name" : "fsan",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "no_padding::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-no_padding-Debug-45fcb92a778b2a2328fb.json",
+					"name" : "no_padding",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "padding::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-padding-Debug-59b833ebd891d40a8edb.json",
+					"name" : "padding",
+					"projectIndex" : 0
+				}
+			]
+		}
+	],
+	"kind" : "codemodel",
+	"paths" : 
+	{
+		"build" : "/home/matti/Desktop/Benchmarks/build",
+		"source" : "/home/matti/Desktop/Benchmarks"
+	},
+	"version" : 
+	{
+		"major" : 2,
+		"minor" : 7
+	}
+}
