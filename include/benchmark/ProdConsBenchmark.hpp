@@ -67,7 +67,7 @@ public:
         }
         if(fileName != ""){
             bool header = flags._overwrite || notFile(fileName);
-            ofstream csvFile(fileName,header? ios::trunc : ios::app);
+            ofstream csvFile(fileName, header? ios::trunc : ios::app);
             if(header){
                 ThroughputCSVHeader(csvFile);
         }

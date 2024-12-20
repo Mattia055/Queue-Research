@@ -4,8 +4,8 @@
 #include <string>
 #include <sstream>
 #include <iostream>
+#include <iomanip>
 #include <chrono>
-
 
 #include "Stats.hpp"
 
@@ -25,6 +25,13 @@ using namespace chrono;
  */
 
 size_t getTotalMemory(bool includeSwap);
+
+struct MemoryInfo {
+    long vmSize = 0;  // Virtual memory size in KB
+    long rssSize = 0; // RSS size in KB
+};
+
+MemoryInfo getProcessMemoryInfo(pid_t pid);
 
 /**
  * Data that will be pushed into the queue;
@@ -54,7 +61,6 @@ struct UserData {
     }
 
 };
-
 
 struct Arguments {
     bool _stdout            = true;
@@ -88,20 +94,23 @@ struct MemoryArguments {
     size_t min_memory;
     milliseconds supSleep;  //producers sleep if max_memory is reached
     milliseconds infSleep;  //consumers sleep if min_memory is reached
-    // synchronized sleep
-    size_t produceBeforeSleep;
-    size_t consumeBeforeSleep;
-    milliseconds producerSleep;     //sleep after producing i items
-    milliseconds consumerSleep;     //sleep after consuming i items
+    short synchro; //0 no synchro, 1 synchro producer, 2 synchro consumer, 3 synchro both
+    milliseconds producerInitialDelay;
+    milliseconds consumerInitialDelay;
+    milliseconds producerSleep; //should be multiple of granularity
+    milliseconds producerUptime;
+    milliseconds consumerSleep;
+    milliseconds consumerUptime;
 
     
-    MemoryArguments(milliseconds supSleepProducer = 100ms,
-                    milliseconds infSleepConsumer = 100ms,
-                    size_t max_memory = getTotalMemory(true)*(2/3),
-                    size_t min_memory = 0
-                    ):  max_memory{max_memory},min_memory{min_memory},
-                        supSleep{supSleepProducer},infSleep{infSleepConsumer}
-    {};
+    MemoryArguments(    milliseconds supSleepProducer = 100ms,
+                        milliseconds infSleepConsumer = 100ms,
+                        size_t max = getTotalMemory(false) / 3 * 2,
+                        size_t min = 0
+                    )
+    :   max_memory{max}, min_memory{min}, supSleep{supSleepProducer}, 
+        infSleep{infSleepConsumer}, synchro{0} 
+    {}
 
 };
 

@@ -5,6 +5,12 @@
 #include <iostream>
 #include <iomanip>
 #include <sys/stat.h>
+#include <iostream>
+#include <fstream>
+#include <string>
+#include <sstream>
+#include <unistd.h>
+
 
 #include "BenchmarkUtils.hpp"
 #include "Stats.hpp"
@@ -138,6 +144,38 @@ size_t getTotalMemory(bool includeSwap) {
     // Return total memory considering the swap flag
     return includeSwap? totalMemory + totalSwap : totalMemory;
 }
+
+// Function to read and return the RSS and VM size of a process
+MemoryInfo getProcessMemoryInfo(pid_t pid) {
+    MemoryInfo memoryInfo = {0, 0};
+    std::ifstream file("/proc/" + std::to_string(pid) + "/status");
+
+    if (!file.is_open()) {
+        std::cerr << "Error opening file for PID " << pid << std::endl;
+        return memoryInfo;
+    }
+
+    std::string line;
+    while (std::getline(file, line)) {
+        // Search for VmSize and VmRSS in the file
+        if (line.substr(0, 6) == "VmSize") {
+            long size = -1;
+            if(std::sscanf(line.c_str(), "VmSize: %ld kB", &size) == 1)
+                memoryInfo.vmSize = size;
+            
+        }
+        else if (line.substr(0, 6) == "VmRSS:") {
+            long size = -1;
+            if(std::sscanf(line.c_str(), "VmRSS: %ld kB", &size) == 1){
+                memoryInfo.rssSize = size;
+            }
+        }
+    }
+    
+    file.close();
+    return memoryInfo;
+}
+
 
 
 

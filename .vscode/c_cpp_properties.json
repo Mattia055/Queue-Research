@@ -5,7 +5,15 @@
             "includePath": [
                 "${workspaceFolder}/**"
             ],
-            "defines": [],
+            "defines": [
+                "__float128=__float128",   // Define __float128 explicitly if needed
+                "_Float128=__float128",    // Define _Float128 if required
+                "_Float32=float",          // Define _Float32 as float
+                "_Float64=double",         // Define _Float64 as double
+                "_Float32x=double",        // Define _Float32x as double
+                "_Float64x=long double",   // Define _Float64x as long double
+                "__SIZEOF_FLOAT128__=16"   // Define the size of __float128
+            ],
             "compilerPath": "/usr/bin/gcc",
             "cStandard": "c17",
             "cppStandard": "gnu++20",

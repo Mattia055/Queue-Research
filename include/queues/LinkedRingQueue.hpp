@@ -5,12 +5,15 @@
 #include <cstddef>  // For alignas
 #include <cassert>
 #include <atomic>
+#include "numa_support.h"
 
 #ifndef CACHE_LINE
 #define CACHE_LINE 64
 #endif
 
-
+#ifndef TRY_CHANGE_CLUSTER
+#define TRY_CHANGE_CLUSTER 100
+#endif
 
 using namespace std;
 
@@ -110,7 +113,8 @@ public:
     }
 
     //simmetrica a enqueue
-    T* dequeue(int tid) {
+
+    inline T* dequeue(int tid) {
         Segment* lhead = HP.protect(kHpHead,head.load(),tid);
         while(true){
 #ifndef DISABLE_HAZARD
@@ -160,14 +164,13 @@ protected:
     alignas(CACHE_LINE) std::atomic<uint64_t> head{0};
     alignas(CACHE_LINE) std::atomic<uint64_t> tail{0};
     alignas(CACHE_LINE) std::atomic<Segment*> next{nullptr};
+    alignas(CACHE_LINE) std::atomic<uint64_t> cluster{0};   //most operations should be on the same cluster
 
-
-    //il const dopo i parametri significa che non modifica l'oggetto
-    inline uint64_t tailIndex(uint64_t t) const {
+    static inline uint64_t tailIndex(uint64_t t) {
         return (t & ~(1ull << 63));
     }
 
-    inline bool isClosed(uint64_t t) const {
+    static inline bool isClosed(uint64_t t) {
         return (t & (1ull<<63)) != 0;
     }
 
@@ -175,18 +178,18 @@ protected:
         while(true) {
             uint64_t t = tail.load();
             uint64_t h = head.load();
-            if(tail.load() != t) continue; //current tail è cambiato
+            if(tail.load() != t) continue;
             if(h>t) {
                 uint64_t tmp = t;
                 if(tail.compare_exchange_strong(tmp,h))
                     break;
-                continue; //qualcuno è riuscito a fare il fix (controlla stato di nuovo)
+                continue;
             }
             break;
         }
     }
 
-    bool closeSegment(const uint64_t tailTicket, bool force) {
+    inline bool closeSegment(const uint64_t tailTicket, bool force) {
         if(!force) {
             uint64_t tmp = tailTicket + 1;
             return tail.compare_exchange_strong(tmp,(tailTicket + 1) | (1ull << 63));
@@ -209,6 +212,27 @@ protected:
     inline uint64_t getNextSegmentStartIndex() {
         return getTailIndex() - 1; 
     }
+
+#ifdef DISABLE_NUMA
+    inline bool safeCluster(bool force){
+        int i = 0;
+        while(!force && i++ < TRY_CHANGE_CLUSTER){
+            if(cluster.load() == getNumaNode())
+                return true;
+        }
+
+        do{
+            uint64_t c = cluster.load();
+            if(Base::cluster.compare_exchange_weak(c,getNumaNode()))
+                return true;
+        }while(!force);
+
+        return false;
+    }
+#else
+    inline bool safeCluster(bool force){return true;}
+#endif
+
 
 public:
     friend class LinkedRingQueue<T,Segment>;   

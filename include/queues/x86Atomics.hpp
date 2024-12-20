@@ -14,7 +14,6 @@
                      "a"(__old1), "d"(__old2));                 \
     __ret; })
 
-
 #define CAS2(ptr, o1, o2, n1, n2)    __CAS2(ptr, o1, o2, n1, n2)
 
 #define BIT_TEST_AND_SET63(ptr)                                 \

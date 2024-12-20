@@ -3,6 +3,7 @@
 #include <chrono>
 #include <unistd.h>
 #include <string>
+#include <array>
 
 #include "FAArray.hpp"
 #include "LPRQ.hpp"
@@ -10,58 +11,122 @@
 #include "SymmetricBenchmark.hpp"
 #include "MuxQueue.hpp"
 #include "ProdConsBenchmark.hpp"
+#include "MemoryBenchmark.hpp"
+
+#define relativePath "../result" //from build to project root
 
 using namespace std;
 using namespace chrono;
 using namespace bench;
 
-// // Define the global variables
-// size_t __totalMemory = 0;
-// // Using the custom hash function for void* (PointerHash struct)
-// std::unordered_map<size_t, size_t> __allocationSizes;
-// std::mutex memory_mutex;
-
 int main(void){
-    //bench::SymmetricBenchmark test1(128,1280,1);
-    //test1.flags._stdout = true;
-    //std::cout << LCRQueue<bench::UserData>::className() << endl;
-    vector<size_t> producerSet{1,2,4};  //Quando finiscono devono fare il test i consumer set
-    vector<size_t> consumerSet{1,2,4,8,16,32,64,128};
-    vector<size_t> sizeSet{32,64,128,256,512,1024,2048,4096,4096*2};
-    vector<double> workSet{0.5};
-    vector<size_t> warmupSet{1'000'000UL};
-    //bench::MemoryBenchmark::MemoryArguments args();
-    //mem1.MemoryRun<LCRQueue>("LPRQ.mem",2048,milliseconds{15000},milliseconds{100});
-    string fileName = "./results/Symmetric.csv";
-    string fileName1= "./results/Prod[1:1].csv";
+    string fileEnqDeq       = "../result/EnqDeq.csv";
+    string fileEnqDeqAdditional = "../result/EnqDeqAdditional.csv";
+    string fileProdCons     = "../result/ProdCons[1:1].csv";
+    string fileProdConsAdditional = "../result/ProdCons[1:1]Additional.csv";
+    string fileProdCons2    = "../result/ProdCons[1:2].csv";
+    string fileProdCons2Additional = "../result/ProdCons[1:2]Additional.csv";
+    string fileProdCons3    = "../result/ProdCons[2:1].csv";
+    string fileProdCons3Additional = "../result/ProdCons[2:1]Additional.csv";
+    string fileMemory       = "../result/MemoryBenchmark.csv";
+    string fileMemory1      = "../result/MemoryBenchmarkAdditional.csv";
 
-    size_t iter = 3'000'000;
-    size_t runs = 25;
+    array<size_t,8> threadSet{1,2,4,8,16,32,64,128};
+    array<size_t,7> threadSetUnbalanced{3,6,12,24,48,96,126};
+    size_t length = 4096*2;
+    size_t iter = 10'000'000;
+    size_t runs = 50;
 
-    double additional = 0;
-
-    for(size_t size : sizeSet)
-    for(size_t thread : producerSet){
-        SymmetricBenchmark test1(thread,additional,size);
-        test1.EnqueueDequeue<MutexBasedQueue>(iter,runs,fileName);
-        test1.EnqueueDequeue<LCRQueue>(iter,runs,fileName);
-        test1.EnqueueDequeue<LPRQueue>(iter,runs,fileName);
-        test1.EnqueueDequeue<FAAQueue>(iter,runs,fileName);
+    //Enqueue Dequeue
+    for(size_t thread : threadSet){
+        SymmetricBenchmark sym1(thread,0,length);
+        sym1.EnqueueDequeue<MutexBasedQueue>(iter,runs,fileEnqDeq);
+        sym1.EnqueueDequeue<LCRQueue>(iter,runs,fileEnqDeq);
+        sym1.EnqueueDequeue<FAAQueue>(iter,runs,fileEnqDeq);
+        sym1.EnqueueDequeue<LPRQueue>(iter,runs,fileEnqDeq);
     }
 
-    milliseconds iterations = 4000ms;
-    runs = 5;
-
-    for(size_t size : sizeSet)
-    for(size_t thread : consumerSet){
-        ProdConsBenchmark test1(thread,thread,0,true,size);
-        test1.ProducerConsumer<MutexBasedQueue>(iterations,runs,fileName1);
-        test1.ProducerConsumer<LCRQueue>(iterations,runs,fileName1);
-        test1.ProducerConsumer<LPRQueue>(iterations,runs,fileName1);
-        test1.ProducerConsumer<FAAQueue>(iterations,runs,fileName1);
+    for(size_t thread : threadSet){
+        SymmetricBenchmark sym1(thread,2,length);
+        sym1.EnqueueDequeue<MutexBasedQueue>(iter,runs,fileEnqDeqAdditional);
+        sym1.EnqueueDequeue<LCRQueue>(iter,runs,fileEnqDeqAdditional);
+        sym1.EnqueueDequeue<FAAQueue>(iter,runs,fileEnqDeqAdditional);
+        sym1.EnqueueDequeue<LPRQueue>(iter,runs,fileEnqDeqAdditional);
     }
-    
-    cout << "FINISHED" <<endl;
+
+    //Producer Consumer 1:1
+    runs = 10;
+    milliseconds duration = duration_cast<milliseconds>(seconds{10});
+    for(size_t i = 0; i< threadSet.size() - 1; i++){
+        ProdConsBenchmark pc1(threadSet[i],threadSet[i],0,false,length);
+        pc1.ProducerConsumer<MutexBasedQueue>(duration,runs,fileProdCons);
+        pc1.ProducerConsumer<LCRQueue>(duration,runs,fileProdCons);
+        pc1.ProducerConsumer<FAAQueue>(duration,runs,fileProdCons);
+        pc1.ProducerConsumer<LPRQueue>(duration,runs,fileProdCons);
+    }
+
+    for(size_t i = 0; i< threadSet.size() - 1; i++){
+        ProdConsBenchmark pc1(threadSet[i],threadSet[i],2,false,length);
+        pc1.ProducerConsumer<MutexBasedQueue>(duration,runs,fileProdConsAdditional);
+        pc1.ProducerConsumer<LCRQueue>(duration,runs,fileProdConsAdditional);
+        pc1.ProducerConsumer<FAAQueue>(duration,runs,fileProdConsAdditional);
+        pc1.ProducerConsumer<LPRQueue>(duration,runs,fileProdConsAdditional);
+    }
+
+    //Producer Consumer 1:2
+    for(size_t thread : threadSetUnbalanced){
+        size_t producer = thread / 3;
+        size_t consumer = thread - producer;
+        ProdConsBenchmark pc1(producer,consumer,0,false,length);
+        pc1.ProducerConsumer<MutexBasedQueue>(duration,runs,fileProdCons2);
+        pc1.ProducerConsumer<LCRQueue>(duration,runs,fileProdCons2);
+        pc1.ProducerConsumer<FAAQueue>(duration,runs,fileProdCons2);
+        pc1.ProducerConsumer<LPRQueue>(duration,runs,fileProdCons2);
+    }
+
+    for(size_t thread : threadSetUnbalanced){
+        size_t producer = thread / 3;
+        size_t consumer = thread - producer;
+        ProdConsBenchmark pc1(producer,consumer,2,false,length);
+        pc1.ProducerConsumer<MutexBasedQueue>(duration,runs,fileProdCons2Additional);
+        pc1.ProducerConsumer<LCRQueue>(duration,runs,fileProdCons2Additional);
+        pc1.ProducerConsumer<FAAQueue>(duration,runs,fileProdCons2Additional);
+        pc1.ProducerConsumer<LPRQueue>(duration,runs,fileProdCons2Additional);
+    }
+
+    //Producer Consumer 2:1
+    for(size_t thread : threadSetUnbalanced){
+        size_t producer = thread * 2 / 3;
+        size_t consumer = thread - producer;
+        ProdConsBenchmark pc1(producer,consumer,0,false,length);
+        pc1.ProducerConsumer<MutexBasedQueue>(duration,runs,fileProdCons3);
+        pc1.ProducerConsumer<LCRQueue>(duration,runs,fileProdCons3);
+        pc1.ProducerConsumer<FAAQueue>(duration,runs,fileProdCons3);
+        pc1.ProducerConsumer<LPRQueue>(duration,runs,fileProdCons3);
+    }
+
+    for(size_t thread : threadSetUnbalanced){
+        size_t producer = thread * 2 / 3;
+        size_t consumer = thread - producer;
+        ProdConsBenchmark pc1(producer,consumer,2,false,length);
+        pc1.ProducerConsumer<MutexBasedQueue>(duration,runs,fileProdCons3Additional);
+        pc1.ProducerConsumer<LCRQueue>(duration,runs,fileProdCons3Additional);
+        pc1.ProducerConsumer<FAAQueue>(duration,runs,fileProdCons3Additional);
+        pc1.ProducerConsumer<LPRQueue>(duration,runs,fileProdCons3Additional);
+    }
+
+    //Memory Benchmark
+    MemoryArguments args;
+    args.synchro = MemoryBenchmark::SYNC_BOTH;
+    args.producerInitialDelay = 10000ms;
+    args.consumerInitialDelay = 0ms;
+    args.producerSleep  = 10000ms;
+    args.consumerSleep  = 10000ms;
+    args.consumerUptime = 10000ms;
+    args.producerUptime = 10000ms;
+
+    MemoryBenchmark mem1(5,5,0,false,4096*4,args);
+    mem1.MemoryRun<LCRQueue>(seconds{360},milliseconds{500},fileMemory);
 
     return 0;
 

@@ -4,10 +4,10 @@
 #include "LinkedRingQueue.hpp"
 #include "RQCell.hpp"
 
-template<typename T,bool padded_cells>
-class PRQueue : public QueueSegmentBase<T, PRQueue<T,padded_cells>> {
+template<typename T,bool padded_cells, bool bounded>
+class PRQueue : public QueueSegmentBase<T, PRQueue<T,padded_cells,bounded>> {
 private:
-    using Base = QueueSegmentBase<T,PRQueue<T,padded_cells>>;
+    using Base = QueueSegmentBase<T,PRQueue<T,padded_cells,bounded>>;
     using Cell = detail::CRQCell<void*,padded_cells>;
     
     Cell* array; 
@@ -58,16 +58,22 @@ public:
 
     static std::string className() {
         using namespace std::string_literals;
-        return "PRQueue"s + (padded_cells ? "/padded":"");
+        return (bounded? "Bounded"s : ""s ) + "PRQueue"s + (padded_cells ? "/padded":"");
     }
 
     bool enqueue(T* item,[[maybe_unused]] const int tid) {
         int try_close = 0;
     
         while(true) {
+
+            while(!Base::safeCluster(false));
+
             uint64_t tailTicket = Base::tail.fetch_add(1);
-            if(Base::isClosed(tailTicket)) {
-                return false;
+            
+            if constexpr (bounded == false){
+                if(Base::isClosed(tailTicket)) {
+                    return false;
+                }
             }
 
             Cell& cell = array[tailTicket % Ring_Size];
@@ -91,8 +97,13 @@ public:
             }
 
             if(tailTicket >= Base::head.load() + Ring_Size){
-                if(Base::closeSegment(tailTicket, ++try_close > TRY_CLOSE))
+                if constexpr (bounded){
                     return false;
+                }
+                else{
+                    if (Base::closeSegment(tailTicket, ++try_close > TRY_CLOSE))
+                        return false;
+                }
             }  
 
         }
@@ -103,7 +114,10 @@ public:
         if(Base::isEmpty())
             return nullptr;
 #endif
-        while(1) {
+        while(true) {
+
+            while(!Base::safeCluster(false));
+
             uint64_t headTicket = Base::head.fetch_add(1);
             Cell& cell = array[headTicket % Ring_Size];
 
@@ -134,9 +148,9 @@ public:
                     if((r & ((1ull << 8 ) -1 )) == 0)
                         tt = Base::tail.load();
 
-                    int closed = Base::isClosed(tt);
+                    int closed = Base::isClosed(tt);    //in case bounded it's always false
                     uint64_t t = Base::tailIndex(tt);
-                    if(unsafe || t < headTicket + 1 || closed || r > 4 * 1024) {
+                    if(unsafe || t < headTicket + 1  || r > 4 * 1024 || closed) {
                         if(isBottom(val) && !cell.val.compare_exchange_strong(val,nullptr))
                             continue;
                         if(cell.idx.compare_exchange_strong(cell_idx, unsafe | (headTicket + Ring_Size)))
@@ -156,8 +170,16 @@ public:
 };
 
 #ifndef NO_PADDING
-template<typename T, bool padded_cells=true>
+template<typename T,bool padded_cells=true,bool bounded=false>
 #else
-template<typename T, bool padded_cells=false>
+template<typename T,bool padded_cells=true,bool bounded=false>
 #endif
-using LPRQueue = LinkedRingQueue<T,PRQueue<T,padded_cells>>;
+using LPRQueue = LinkedRingQueue<T,PRQueue<T,true,false>>;
+
+#ifndef NO_PADDING
+template<typename T,bool padded_cells=true,bool bounded=true>
+using BoundedPRQueue = PRQueue<T,true,true>;
+#else
+template<typename T,bool padded_cells=false,bool bounded=true>
+using BoundedPRQueue = PRQueue<T,false,true>;
+#endif
