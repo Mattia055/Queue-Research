@@ -35,8 +35,8 @@ private:
         return i & (1ull << 63);
     }
 
-public:
-    CRQueue(uint64_t start, size_t Ring_Size = RING_SIZE) : Base(),
+private:
+    CRQueue(uint64_t start, size_t Ring_Size) : Base(),
                                                             Ring_Size{Ring_Size}
     {
         array = new Cell[Ring_Size];
@@ -53,6 +53,9 @@ public:
         Base::cluster.store(isNumaAvailable() ? getNumaNode() : 0, std::memory_order_relaxed);
     }
 
+public:
+    CRQueue(size_t Ring_Size=RING_SIZE): CRQueue(uint64_t(0),Ring_Size) {}
+
     ~CRQueue()
     {
         delete[] array;
@@ -64,7 +67,6 @@ public:
         return (bounded? "Bounded"s : ""s ) + "CRQueue"s + (padded_cells ? "/padded" : "");
     }
 
-public:
     bool enqueue(T *item,[[maybe_unused]] const int tid)
     {
         int try_close = 0;
@@ -72,7 +74,7 @@ public:
         while (true)
         {
             while(!Base::safeCluster(false));
-
+            
             uint64_t tailTicket = Base::tail.fetch_add(1);
 
             if constexpr (bounded == false){
@@ -172,6 +174,17 @@ public:
             }
         }
     }
+
+    inline size_t size() const {
+        if constexpr (bounded){
+            uint64_t length = Base::tail.load() - Base::head.load();
+            return length < 0 ? 0 : length > Ring_Size ? Ring_Size : length;
+        } else {
+            return Base::size();
+        }
+    }
+
+    friend class LinkedRingQueue<T,CRQueue<T,padded_cells,bounded>>;   
 };
 
 
@@ -180,12 +193,11 @@ template<typename T,bool padded_cells=true,bool bounded=false>
 #else
 template<typename T,bool padded_cells=true,bool bounded=false>
 #endif
-using LCRQueue = LinkedRingQueue<T,CRQueue<T,true,false>>;
+using LCRQueue = LinkedRingQueue<T,CRQueue<T,padded_cells,bounded>>;
 
 #ifndef NO_PADDING
 template<typename T,bool padded_cells=true,bool bounded=true>
-using BoundedCRQueue = CRQueue<T,true,true>;
 #else
 template<typename T,bool padded_cells=false,bool bounded=true>
-using BoundedCRQueue = CRQueue<T,false,true>;
 #endif
+using BoundedCRQueue = CRQueue<T,padded_cells,bounded>;

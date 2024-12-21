@@ -37,8 +37,8 @@ private:
         return reinterpret_cast<void*>(static_cast<uintptr_t>((tid << 1) | 1));
     }
 
-public:
-    PRQueue(uint64_t start, size_t Ring_Size = RING_SIZE):
+private:
+    PRQueue(uint64_t start, size_t Ring_Size):
     Base(),
     Ring_Size{Ring_Size}
     {
@@ -52,6 +52,10 @@ public:
         Base::head.store(start,std::memory_order_relaxed);
         Base::tail.store(start,std::memory_order_relaxed);
     }
+
+public:
+    PRQueue(size_t Ring_Size = RING_SIZE): PRQueue(0,Ring_Size){}
+
     ~PRQueue(){
         delete[] array;
     }
@@ -166,6 +170,18 @@ public:
             }
         }
     }
+
+    inline size_t size() const {
+        if constexpr (bounded){
+            uint64_t length = Base::tail.load() - Base::head.load();
+            return length < 0 ? 0 : length > Ring_Size ? Ring_Size : length;
+        } else {
+            return Base::size();
+        }
+    }
+
+public: 
+    friend class LinkedRingQueue<T,PRQueue<T,padded_cells,bounded>>;   
   
 };
 

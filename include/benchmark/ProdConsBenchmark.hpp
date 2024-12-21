@@ -127,7 +127,7 @@ template<template<typename> typename Q>
                 else{
                     if((iter &((1ull << 5)-1)) != 0 ||//every 31 iterations
                     !balancedLoad               ||
-                    (queue->estimateSize(tid) < queue->Ring_Size * 7 / 10)) {
+                    (queue->size(tid) < queue->Ring_Size * 7 / 10)) {
                         queue->enqueue(&ud,tid);
                         ++iter;
                     }
@@ -146,9 +146,7 @@ template<template<typename> typename Q>
             //Warmup    Iterations
             for(size_t iter = 0; iter < warmup/consumers; ++iter){
                 UserData *d = queue->dequeue(tid);
-                if(d != nullptr && d->seq > 0){//to prevent Dead Code elimination
-                    cout << "This will never appear" << endl; //
-                }
+                
             }
             barrier.arrive_and_wait();
             //Drain the queue

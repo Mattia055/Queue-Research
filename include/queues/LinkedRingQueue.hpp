@@ -147,7 +147,7 @@ public:
         }
     }
 
-    size_t estimateSize(int tid) {
+    size_t size(int tid) {
         Segment *lhead = HP.protect(kHpHead,head,tid);
         Segment *ltail = HP.protect(kHpTail,tail,tid);
         uint64_t t = ltail->getTailIndex();
@@ -187,6 +187,13 @@ protected:
             }
             break;
         }
+    }
+
+    size_t size() const {
+        uint64_t size;
+            size = tail.load() - head.load();
+
+        return size > 0 ? size : 0;
     }
 
     inline bool closeSegment(const uint64_t tailTicket, bool force) {

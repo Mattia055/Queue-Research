@@ -87,12 +87,12 @@ public:
         return "FAAArrayQueue"s + (padded_cells ? "/padded" : "");
     }
 
-    size_t estimateSize(int tid) {
+    size_t size(int tid) {
         Node* lhead = HP.protect(kHpHead,head,tid);
         Node* ltail = HP.protect(kHpTail,tail,tid);
 
         uint64_t t = std::min((uint64_t) Ring_Size, ((uint64_t) ltail->enqidx.load())) + ltail->startIndexOffset;
-        uint64_t h = std::min((uint64_t) Ring_Size, ((uint64_t) lhead->enqidx.load())) + lhead->startIndexOffset;
+        uint64_t h = std::min((uint64_t) Ring_Size, ((uint64_t) lhead->deqidx.load())) + lhead->startIndexOffset;
         HP.clear(tid);
         return t > h ? t - h : 0;
     }
@@ -108,7 +108,7 @@ public:
                 if(ltail != tail.load()) continue;
                 Node* lnext = ltail->next.load(); 
                 if(lnext == nullptr) {
-                    Node* newNode = new Node(item,ltail->startIndexOffset * Ring_Size, Ring_Size);
+                    Node* newNode = new Node(item,ltail->startIndexOffset + Ring_Size, Ring_Size);
                     if(ltail->casNext(nullptr,newNode)) {
                         casTail(ltail, newNode);
                         HP.clear(kHpTail,tid);
@@ -202,7 +202,7 @@ public:
         }
     }
 
-    size_t estimateSize(int tid) { return f->estimateSize(tid); }
+    size_t size(int tid) { return f->size(tid); }
 
     inline void enqueue(T* item, const int tid) { return f->enqueue(item, tid); }
     inline T* dequeue(const int tid) { return f->dequeue(tid);}
