@@ -5,7 +5,7 @@
 #include <cstddef>  // For alignas
 #include <cassert>
 #include <atomic>
-#include "numa_support.h"
+#include "numa_support.hpp"
 
 #ifndef CACHE_LINE
 #define CACHE_LINE 64
@@ -104,15 +104,11 @@ public:
             } 
             else 
                 delete newTail;
-            
-            //cout << "new Queue" << endl;
 
             ltail = HP.protect(kHpTail,nullSegment,tid);
 
         }
     }
-
-    //simmetrica a enqueue
 
     inline T* dequeue(int tid) {
         Segment* lhead = HP.protect(kHpHead,head.load(),tid);
@@ -131,7 +127,6 @@ public:
                     item = lhead->dequeue(tid); //DequeueAfterNextLinked(lnext)
                     if (item == nullptr) {
                         if (head.compare_exchange_strong(lhead, lnext)) {
-                            //cout << "delete Queue" << endl;
                             HP.retire(lhead, tid); //elimino il vecchio puntatore a testa
                             lhead = HP.protect(kHpHead, lnext, tid); //proteggo il nuovo puntatore a testa
                         } else {
@@ -190,9 +185,7 @@ protected:
     }
 
     size_t size() const {
-        uint64_t size;
-            size = tail.load() - head.load();
-
+        long size = tail.load() - head.load();
         return size > 0 ? size : 0;
     }
 
@@ -223,11 +216,9 @@ protected:
 #ifdef DISABLE_NUMA
     inline bool safeCluster(bool force){
         int i = 0;
-        while(!force && i++ < TRY_CHANGE_CLUSTER){
-            if(cluster.load() == getNumaNode())
-                return true;
+        while(!force && (i++ < TRY_CHANGE_CLUSTER)){
+            if(cluster.load() == getNumaNode()) return true;
         }
-
         do{
             uint64_t c = cluster.load();
             if(Base::cluster.compare_exchange_weak(c,getNumaNode()))

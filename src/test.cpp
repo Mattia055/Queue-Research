@@ -7,12 +7,14 @@
 #include <barrier>
 #include <vector>
 #include <numeric>
+#include <random>
 
 //#include "LinkedRingQueue.hpp"
 #include "FAArray.hpp"
 #include "LCRQ.hpp"
 #include "LPRQ.hpp"
 #include "ThreadGroup.hpp"
+
 
 // Define type aliases for each queue type you want to test
 template<typename V>
@@ -110,7 +112,7 @@ using BQueuesOfInts = BoundedQueues<int>;
 
 TYPED_TEST_SUITE(Bounded_Traits, BQueuesOfInts);
 
-TYPED_TEST(Bounded_Traits, NotOverflowRing) {
+TYPED_TEST(Bounded_Traits, OverflowRing) {
     TypeParam& queue = this->queue;
     //Queue must be full but not overflown
     int values[32];
@@ -134,6 +136,36 @@ TYPED_TEST(Bounded_Traits, NotOverflowRing) {
     EXPECT_EQ(queue.dequeue(0), nullptr);
     EXPECT_EQ(queue.size(),0);
 
+}
+
+TYPED_TEST(Bounded_Traits, UnderflowRing){
+    TypeParam& queue = this->queue;
+    int values[this->RingSize];
+    int try_overwrite = 0;
+    std::random_device rd;
+    std::mt19937 gen(rd());
+
+    std::uniform_int_distribution<> dis(this->RingSize + 1,(this->RingSize * 10) + 1);
+    
+    for(int j = 0; j< 100; j++){
+        for(int i = 0; i<this->RingSize; i++){
+            values[i] = i+1;
+            EXPECT_EQ(queue.enqueue(&(values[i]),0),true);
+        }
+
+        int n_enqueue;
+        do{
+            n_enqueue = dis(gen);
+        } while((n_enqueue % this->RingSize) == 0);
+        //Try to mess up the order of elements
+
+        for(int i = 0; i< n_enqueue; i++)
+            EXPECT_EQ(queue.enqueue(&(try_overwrite),0),false);
+
+        for(int i = 0; i< this->RingSize; i++){
+            EXPECT_EQ(*queue.dequeue(0),values[i]);
+        }
+    }
 }
 
 TYPED_TEST(Bounded_Traits, EnqueueDequeueStress){
