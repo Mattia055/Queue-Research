@@ -138,7 +138,7 @@ TYPED_TEST(Bounded_Traits, OverflowRing) {
 
 }
 
-TYPED_TEST(Bounded_Traits, UnderflowRing){
+TYPED_TEST(Bounded_Traits, FlowRing){
     TypeParam& queue = this->queue;
     int values[this->RingSize];
     int try_overwrite = 0;
@@ -162,9 +162,11 @@ TYPED_TEST(Bounded_Traits, UnderflowRing){
         for(int i = 0; i< n_enqueue; i++)
             EXPECT_EQ(queue.enqueue(&(try_overwrite),0),false);
 
-        for(int i = 0; i< this->RingSize; i++){
+        for(int i = 0; i< this->RingSize; i++)
             EXPECT_EQ(*queue.dequeue(0),values[i]);
-        }
+        
+        for(int i = 0; i< dis(gen); i++)
+            EXPECT_EQ(queue.dequeue(0),nullptr);
     }
 }
 
