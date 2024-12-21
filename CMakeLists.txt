@@ -3,6 +3,9 @@ cmake_minimum_required(VERSION 3.5)
 project(QueueBenchmark)  # Set project name
 set(CMAKE_CXX_STANDARD 20)  # Use C++20 standard
 
+# Set the build type to Debug (this will automatically add -g for debugging symbols)
+set(CMAKE_BUILD_TYPE Debug)
+
 # Header files
 set(INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/include
@@ -78,7 +81,8 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(googletest)
 
 # Link GoogleTest and pthread to the test executable
-target_link_libraries(tests PRIVATE GTest::gtest GTest::gmock pthread)
+target_compile_options(tests PRIVATE -fsanitize=address PUBLIC -g)
+target_link_libraries(tests PRIVATE GTest::gtest GTest::gmock pthread -fsanitize=address)
 
 # Include directories for the test executable
 target_include_directories(tests PRIVATE ${INCLUDE_DIRS} ${gtest_SOURCE_DIR}/googletest/include)
