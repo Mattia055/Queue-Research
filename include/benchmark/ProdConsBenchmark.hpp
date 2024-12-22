@@ -3,10 +3,12 @@
 #include <iostream>
 #include <barrier>
 
-#include "BenchmarkUtils.hpp"
+#include "Benchmark.hpp"
 #include "ThreadGroup.hpp"
 #include "AdditionalWork.hpp"
 #include "MuxQueue.hpp"
+#include "LPRQ.hpp"
+#include "LCRQ.hpp"
 #include "Stats.hpp"
 
 using namespace std;
@@ -14,7 +16,7 @@ using namespace chrono;
 
 namespace bench {
 
-class ProdConsBenchmark {
+class ProdConsBenchmark: public Benchmark{
 private:
     static constexpr size_t WARMUP      = 1'000'000ULL;
     static constexpr size_t RINGSIZE    = 4096;
@@ -117,7 +119,11 @@ template<template<typename> typename Q>
 
             while(!stopFlag.load()){
                 //If balance load we "slow down" producers every few iterations
-                if constexpr (std::is_same_v<Q<UserData>, MutexBasedQueue<UserData>>){  //MutexBasedQueue is problematic
+                if constexpr(   std::is_same_v<Q<UserData>, BoundedMuxQueue<UserData>>  || 
+                                std::is_same_v<Q<UserData>, LinkedMuxQueue<UserData>>   ||
+                                std::is_same_v<Q<UserData>, BoundedCRQueue<UserData>>   ||
+                                std::is_same_v<Q<UserData>, BoundedPRQueue<UserData>> 
+                            ){  //BoundedQueues is problematic
                     if((iter &((1ull << 5)-1)) != 0 ||//every 31 iterations
                     !balancedLoad) {
                         queue->enqueue(&ud,tid);
@@ -126,7 +132,7 @@ template<template<typename> typename Q>
                 } 
                 else{
                     if((iter &((1ull << 5)-1)) != 0 ||//every 31 iterations
-                    !balancedLoad               ||
+                    !balancedLoad                   ||
                     (queue->size(tid) < queue->Ring_Size * 7 / 10)) {
                         queue->enqueue(&ud,tid);
                         ++iter;
@@ -227,7 +233,7 @@ public:
                                 const vector<size_t>& warmupSet,
                                 const Duration runDuration,
                                 const size_t numRuns,
-                                const bench::Arguments args=bench::Arguments())
+                                const Arguments args=Arguments())
     {
 
 
@@ -243,7 +249,6 @@ public:
         uint64_t totalTimeInSec = totalTests * numRuns * runDurationSec;
         int iTest = 0;
         if(args._progress){
-            clearTerminal();
             cout    << "Executed " << iTest << " of " << totalTests << " runs\n"
                     << "Time Remaining " << formatTime(totalTimeInSec) <<endl;
         }
@@ -268,8 +273,7 @@ public:
                                                     sts
                                                     );
                                 iTest++;
-                                if(args._clear_terminal && (args._progress || args._stdout)){
-                                    clearTerminal();
+                                if((args._progress || args._stdout)){
                                     if(args._progress){
                                         totalTimeInSec -= (runDurationSec*numRuns);
                                         cout    << "Executed " << iTest << " of " << totalTests << " runs\n"

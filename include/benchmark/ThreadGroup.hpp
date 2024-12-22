@@ -23,11 +23,13 @@ public:
         threads.emplace_back(std::move(func), std::forward<Args>(args)..., tid);
     }
 
-    template<class T, class R, class... Args>
+    template <class T, class R, class... Args>
     void threadWithResult(T func, R& result, Args&&... args) {
-        thread([func = std::move(func), &result](Args&&... args, const int tid) {
-            result = std::move(func)(std::forward<Args>(args)..., tid);
-        }, std::forward<Args>(args)...);
+        threads.emplace_back(
+            [func = std::move(func), &result, ... capturedArgs = std::forward<Args>(args)](int tid) {
+                result = func(capturedArgs..., tid);
+            },
+            static_cast<int>(threads.size()));
     }
 
     void join() {

@@ -9,7 +9,7 @@
 #include <fstream>
 #include <cassert>
 
-#include "BenchmarkUtils.hpp"   //  for general purpose function
+#include "Benchmark.hpp"        //  for benchmarking Base Class
 #include "Stats.hpp"            //  for average and stddev computation
 #include "ThreadGroup.hpp"      //  for thread scheduling
 #include "AdditionalWork.hpp"   //  Additional Work by threads
@@ -19,7 +19,7 @@ using namespace chrono;
 
 namespace bench {
 
-class SymmetricBenchmark {
+class SymmetricBenchmark: public Benchmark {
 public:
     
     struct Result {
@@ -54,7 +54,7 @@ public:
         }
     };
 
-// ===== CLASS ATTRIBUTES =====
+// ===== CLASS ATTRIBUTES ===== //
 
 public:
     Arguments flags;
@@ -140,7 +140,6 @@ private:
             //Measuration
             auto startBeat = steady_clock::now();
             for(size_t iter = 0; iter < IterNum / threads; ++iter) {
-                //puts("HERE");
                 queue->enqueue(&ud,tid);
                 random_additional_work(additionalWork);
                 if(queue->dequeue(tid) == nullptr)
@@ -217,13 +216,10 @@ public:
                                             sts
                         );
                         iTest++;
-                        if(args._clear_terminal && (args._progress || args._stdout)){
-                            clearTerminal();
-                            if(args._progress)
-                                cout << "Executed " << iTest << " of " << totalTests << " runs" << endl;
-                            if(args._stdout)
-                                printBenchmarkResults(Q<UserData>::className(),"Transf/Sec",sts.mean,sts.stddev);
-                        }
+                        if(args._progress)
+                            cout << "Executed " << iTest << " of " << totalTests << " runs" << endl;
+                        if(args._stdout)
+                            printBenchmarkResults(Q<UserData>::className(),"Transf/Sec",sts.mean,sts.stddev); 
                     }
                 }
             }

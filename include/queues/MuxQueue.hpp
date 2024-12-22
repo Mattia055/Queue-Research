@@ -13,39 +13,43 @@
  */
 
 using namespace std;
-
-/**
- * For now we work on the assumption that the queue is always 
- * unbounded.
- * 
- * The underlying structure of std::queue handles the growing and 
- * shrinking of the queue;
- * 
- * Supposedly this queue is always slower than lock free alternatives
- * it'd be more slow accounting for allocations of different rings
- */
 template<typename T, bool bounded>
-class Queue {
+class MuxQueue {
 private:
+    static constexpr size_t MAX_SIZE = 1024ULL;
     std::queue<T*>   muxQueue;
-    mutex       mux;         
+    mutex            mux;   
+    size_t           max_size;
+
 
 public:
-    Queue(){};
-    ~Queue(){};
+    MuxQueue(size_t max_size=MAX_SIZE):max_size{max_size}{};
+    MuxQueue(size_t maxThreads, size_t max_size):max_size{max_size}{};
+    ~MuxQueue(){};
 
-    size_t estimateSize(int tid){ 
+    size_t size([[maybe_unused]] const int tid){
+        return size();
+    }
+
+    size_t size(){ 
         lock_guard<mutex> lock(mux);
         return muxQueue.size();
     }
 
-    inline void enqueue(T* item, const int tid){
-        std::lock_guard<std::mutex> lock(mux);
-        muxQueue.push(item);
-        return;
+    static inline std::string className(){
+        return "BoundedMuxQueue";
     }
 
-    inline T* dequeue(const int tid){
+    inline bool enqueue(T* item,[[maybe_unused]] const int tid){
+        std::lock_guard<std::mutex> lock(mux);
+        if constexpr (bounded){
+            if(muxQueue.size() >= max_size) return false;
+        }
+        muxQueue.push(item);
+        return true;
+    }
+
+    inline T* dequeue([[maybe_unused]] const int tid){
         T* item;
         lock_guard<mutex> lock(mux);
         if(!muxQueue.empty()){
@@ -58,31 +62,26 @@ public:
 };
 
 template<typename T,typename QueueType>
-class MutexLinkedAdapter{
+class MuxLinkedAdapter{
 private:
     QueueType *m;
 public:
-    MutexLinkedAdapter(size_t maxThreads, size_t Buffer_size){
+    MuxLinkedAdapter(size_t maxThreads, size_t Buffer_size){
         m = new QueueType();
     }
-    ~MutexLinkedAdapter(){
+    ~MuxLinkedAdapter(){
         delete m;
     }
     static inline std::string className(){
-        return "MutexBasedQueue";
+        return "LinkedMuxQueue";
     }
-    inline size_t estimateSize(int tid){return m->estimateSize(tid);}
-    inline void enqueue(T* item, const int tid){return m->enqueue(item,tid);}
+    inline size_t size(int tid){return m->size(tid);}
+    inline void enqueue(T* item, const int tid){m->enqueue(item,tid);}
     inline T* dequeue(const int tid){return m->dequeue(tid);};
 };
+
 template<typename T,bool bounded=true>
-using MutexBasedQueue = MutexLinkedAdapter<T,Queue<T,bounded>>;
+using BoundedMuxQueue = MuxQueue<T,bounded>;
 
-
-
-
-
-    
-
-
-    
+template<typename T,bool bounded=false>
+using LinkedMuxQueue = MuxLinkedAdapter<T,MuxQueue<T,bounded>>;

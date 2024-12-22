@@ -11,10 +11,6 @@ private:
     using Cell = detail::CRQCell<void*,padded_cells>;
     
     Cell* array; 
-
-    static constexpr size_t RING_SIZE = 128;
-    static constexpr size_t TRY_CLOSE = 10;
-
     const size_t Ring_Size;
 
     inline uint64_t nodeIndex(uint64_t i) const {
@@ -37,24 +33,24 @@ private:
         return reinterpret_cast<void*>(static_cast<uintptr_t>((tid << 1) | 1));
     }
 
-private:
-    PRQueue(uint64_t start, size_t Ring_Size):
+public:
+    PRQueue(size_t Ring_Size=Base::RING_SIZE):
     Base(),
     Ring_Size{Ring_Size}
     {
         array = new Cell[Ring_Size];
-        for(uint64_t i = start; i < start + Ring_Size; i++) { 
+        for(uint64_t i = 0; i < Ring_Size; i++) { 
             uint64_t j = i % Ring_Size;
             array[j].val.store(nullptr,std::memory_order_relaxed);
             array[j].idx.store(i,std::memory_order_relaxed);
         }
 
-        Base::head.store(start,std::memory_order_relaxed);
-        Base::tail.store(start,std::memory_order_relaxed);
+        Base::head.store(0,std::memory_order_relaxed);
+        Base::tail.store(0,std::memory_order_relaxed);
     }
 
-public:
-    PRQueue(size_t Ring_Size = RING_SIZE): PRQueue(0,Ring_Size){}
+    //Constructor to ensure protability with LinkedRing Variants
+    PRQueue(size_t threads,size_t Ring_Size): PRQueue(Ring_Size){}
 
     ~PRQueue(){
         delete[] array;
@@ -105,7 +101,7 @@ public:
                     return false;
                 }
                 else{
-                    if (Base::closeSegment(tailTicket, ++try_close > TRY_CLOSE))
+                    if (Base::closeSegment(tailTicket, ++try_close > Base::TRY_CLOSE))
                         return false;
                 }
             }  

@@ -13,36 +13,73 @@
 #include <unistd.h>
 #include <atomic>
 #include <cstring>
+#include <string>
 
-#include "BenchmarkUtils.hpp"
+#include "Benchmark.hpp"
 #include "ThreadGroup.hpp"
 #include "AdditionalWork.hpp"
 
-#define MEM_MGR_PATH "./memoryManager"
-#define GRANULARITY 500 //number of iterations before checking time
+
 
 namespace bench{
 
 
-class MemoryBenchmark{
+class MemoryBenchmark: public Benchmark{
+private:
+    static constexpr std::string MEM_MGR_PATH    = "./memoryManager";
+    static constexpr size_t GRANULARITY     = 500; //number of iterations before checking time
+
 public:
     struct Results{
-        double RSS_mean;
-        double RSS_stddev;
-        double VM_mean;
-        double VM_stddev;
+        size_t RSS_max      = 0;
+        size_t VM_max       = 0;
+        size_t RSS_min      = 0;
+        size_t VM_min       = 0;
+        size_t RSS_start    = 0;
+        size_t VM_start     = 0;
+        size_t RSS_end      = 0;
+        size_t VM_end       = 0;
+        double RSS_mean     = 0;
+        double VM_mean      = 0;
+        double RSS_stddev   = 0;
+        double VM_stddev    = 0;
     };
 
-    static constexpr short SYNC_NONE    = 0;
+    struct MemoryInfo {
+        long vmSize = 0;  // Virtual memory size in KB
+        long rssSize = 0; // RSS size in KB
+    };
+
+    struct MemoryArguments {
+
+    size_t max_memory;
+    size_t min_memory;
+    milliseconds supSleep;  //producers sleep if max_memory is reached
+    milliseconds infSleep;  //consumers sleep if min_memory is reached
+    short synchro;         //Bitmask for synchro
+    milliseconds producerInitialDelay;
+    milliseconds consumerInitialDelay;
+    milliseconds producerSleep; //should be multiple of granularity
+    milliseconds producerUptime;
+    milliseconds consumerSleep;
+    milliseconds consumerUptime;
+
+    
+    MemoryArguments(    milliseconds supSleepProducer = 100ms,
+                        milliseconds infSleepConsumer = 100ms,
+                        size_t max = getTotalMemory(false) / 3 * 2,
+                        size_t min = 0
+                    )
+    :   max_memory{max}, min_memory{min}, supSleep{supSleepProducer}, 
+        infSleep{infSleepConsumer}, synchro{0} 
+    {}
+
+};
+
+
     static constexpr short SYNC_PRODS   = 1;
     static constexpr short SYNC_CONS    = 2;
-    static constexpr short SYNC_BOTH    = 4;
 
-private:
-    static constexpr size_t WARMUP      = 1'000'000ULL;
-    static constexpr size_t RINGSIZE    = 4096;
-
-public:
     size_t producers, consumers;
     size_t warmup;
     size_t ringSize;
@@ -53,13 +90,16 @@ public:
     Arguments   flags;
     MemoryArguments memoryFlags;
 
-    MemoryBenchmark(size_t numProducers, size_t numConsumers, double additionalWork,
-                bool balancedLoad, size_t ringSize = RINGSIZE, 
-                MemoryArguments mflags = MemoryArguments(), size_t warmup = WARMUP,
-                Arguments args = Arguments())
+    MemoryBenchmark(    size_t numProducers, size_t numConsumers, double additionalWork,
+                        bool balancedLoad, size_t ringSize = RINGSIZE, 
+                        MemoryArguments mflags = MemoryArguments(), 
+                        size_t warmup = WARMUP,Arguments args = Arguments()
+                    )
     : producers{numProducers}, consumers{numConsumers}, additionalWork{additionalWork},
       ringSize{ringSize}, balancedLoad{balancedLoad}, warmup{warmup}, flags{args},
       memoryFlags{mflags}{};
+
+    
     ~MemoryBenchmark(){};
 
     //fork exec the process
@@ -144,10 +184,9 @@ private:
             }
             
         };
-
         const auto synchro_cons_lambda = [this,&stopFlag,&queue,&barrier,&consumerFlag,granularity](const int tid){
             UserData *ud;
-            int sleepFlag = 1; //flag to check with mainù
+            int sleepFlag = 1; //flag to check with main
             barrier.arrive_and_wait();
             for(size_t iter = 0; iter < warmup/consumers; ++iter){
                 ud = queue->dequeue(tid);
@@ -278,8 +317,8 @@ private:
         pid_t pid = vfork();
         if(pid == 0)
         {
-            if (execl(  MEM_MGR_PATH, 
-                        MEM_MGR_PATH,
+            if (execl(  MEM_MGR_PATH.c_str(), 
+                        MEM_MGR_PATH.c_str(),
                         std::to_string(getppid()).c_str(),              //parent pid
                         std::to_string(runDuration.count()).c_str(),    //duration
                         std::to_string(granularity.count()).c_str(),    //granularity
@@ -303,12 +342,9 @@ private:
 
             ThreadGroup threads{};
 
-            auto prod_routine = prod_lambda;
-            auto cons_routine = cons_lambda;
-
             //Thread scheduling
 
-            if(memoryFlags.synchro == SYNC_NONE || memoryFlags.synchro == SYNC_CONS){
+            if(memoryFlags.synchro == 0 || memoryFlags.synchro == SYNC_CONS){
                 for(size_t iProd = 0; iProd < producers; iProd++)
                     threads.thread(prod_lambda);
             } else{ 
@@ -316,7 +352,7 @@ private:
                     threads.thread(synchro_prod_lambda);
             }
 
-            if(memoryFlags.synchro == SYNC_NONE || memoryFlags.synchro == SYNC_PRODS){
+            if(memoryFlags.synchro == 0 || memoryFlags.synchro == SYNC_PRODS){
                 for(size_t iCons = 0; iCons < consumers; iCons++)
                     threads.thread(cons_lambda);
             } else{
@@ -352,71 +388,192 @@ private:
 
         }
 
-        //compute mean and stddev incrementally
-        std::ifstream file(fileName);
-        string line;
-
-        double RSS_mean = 0;
-        double RSS_stddev = 0;
-        double VM_mean = 0;
-        double VM_stddev = 0;
-
-        size_t count = 0;
-        while(std::getline(file,line)){
-            double rssSize,vmSize;
-            std::sscanf(line.c_str(), "%lf,%lf", &vmSize, &rssSize);
-            RSS_mean += rssSize;
-            VM_mean += vmSize;
-            count++;
-        }
-
-        RSS_mean /= count;
-        VM_mean /= count;
-
-        file.clear();
-        file.seekg(0);
-        count = 0;
-        while(std::getline(file,line)){
-            double rssSize,vmSize;
-            count++;
-            std::sscanf(line.c_str(), "%lf,%lf", &vmSize, &rssSize);
-            RSS_stddev  += pow((rssSize - RSS_mean),2);
-            VM_stddev   += pow((vmSize - VM_mean),2);
-        }
-
-        RSS_stddev  = sqrt(RSS_stddev/count);
-        VM_stddev   = sqrt(VM_stddev/count);
-
-        file.close();
-        return Results{RSS_mean,RSS_stddev,VM_mean,VM_stddev};
+    return computeMetrics(fileName);
 
         
     }
 
-    std::string randomDigits(size_t n){
-        std::string digits = "0123456789";
-        std::string result;
-        for(size_t i = 0; i < n; i++){
-            result += digits[rand() % 10];
-        }
-        return result;
+Results computeMetrics(string filename){
+    std::ifstream file(filename);
+    std::string line;
+    double RSS_mean, VM_mean;
+    double RSS_stddev, VM_stddev;
+    size_t RSS_max,VM_max;
+    size_t RSS_min,VM_min;
+    size_t RSS_start,VM_start;
+    size_t RSS_end,VM_end;
+
+    size_t RSS_curr, VM_curr;
+    size_t count = 1;
+
+    //get first line
+    bool eFile = true;  //assume empty file
+
+    while(std::getline(file,line)){
+        if(std::sscanf(line.c_str(), "%ld,%ld",&RSS_curr,&VM_curr) != 2) continue;
+        RSS_mean = RSS_curr = RSS_max = RSS_min = RSS_start;
+        VM_mean = VM_curr = VM_max = VM_min = VM_start;
+        eFile = false;
+        break;
     }
 
+    if(eFile){
+        return Results{};
+    }
 
+    while(std::getline(file,line)){
+        if(std::sscanf(line.c_str(), "%ld,%ld",&RSS_curr,&VM_curr) != 2) continue;
+        RSS_mean += RSS_curr;
+        VM_mean += VM_curr;
+        if(RSS_curr > RSS_max) RSS_max = RSS_curr;
+        if(RSS_curr < RSS_min) RSS_min = RSS_curr;
+        if(VM_curr > VM_max) VM_max = VM_curr;
+        if(VM_curr < VM_min) VM_min = VM_curr;
+        count++;
+    }
+
+    //get last results
+    RSS_end = RSS_curr;
+    VM_end = VM_curr;
+
+    RSS_mean /= count;
+    VM_mean /= count;
+
+    //compute stddev
+    file.clear();
+    file.seekg(0);
+
+    RSS_stddev = 0; 
+    VM_stddev = 0;
+
+    while(std::getline(file,line)){
+        if(std::sscanf(line.c_str(), "%ld,%ld",&RSS_curr,&VM_curr) != 2) continue;
+        RSS_stddev += pow((RSS_curr - RSS_mean),2);
+        VM_stddev += pow((VM_curr - VM_mean),2);
+    }
+
+    RSS_stddev = sqrt(RSS_stddev/(count-1));
+    VM_stddev = sqrt(VM_stddev/(count-1));
+
+    file.close();
+
+    Results retval;
+    retval.RSS_max = RSS_max;
+    retval.VM_max = VM_max;
+    retval.RSS_min = RSS_min;
+    retval.VM_min = VM_min;
+    retval.RSS_start = RSS_start;
+    retval.VM_start = VM_start;
+    retval.RSS_end = RSS_end;
+    retval.VM_end = VM_end;
+    retval.RSS_mean = RSS_mean;
+    retval.VM_mean = VM_mean;
+    retval.RSS_stddev = RSS_stddev;
+    retval.VM_stddev = VM_stddev;
+
+
+    return retval;
+
+}
 
 public: 
     template<template<typename> typename Q>
     void MemoryRun(seconds runDuration,milliseconds granularity,string fileName=""){
-        //filename is the file where the memory monitor writes the data [temporary]
-        if(fileName == "")
-            fileName = Q<UserData>::className() + "_Memory_" + "" + ".csv";
+        bool deleteAfter = false;
+        if(fileName == ""){
+            fileName = Q<UserData>::className() + "_Mem" + ".tmp";
+            deleteAfter = true;
+        }
 
         Results res = __MemoryBenchmark<Q>(runDuration,granularity,fileName);
+
+        if(deleteAfter){
+            std::remove(fileName.c_str());
+        }
+
         if(flags._stdout){
             printBenchmarkResults("MemoryBenchmark","RSS",res.RSS_mean,res.RSS_stddev);
             printBenchmarkResults("MemoryBenchmark","VM",res.VM_mean,res.VM_stddev);
         }
     }
+
+public:
+static inline size_t getTotalMemory(bool includeSwap) {
+    using namespace std;
+#ifndef __linux__
+    cerr << "Can't get total memory : only linux systems" << endl;
+#ifdef SYS_CAUTIOUS
+    exit(0);
+#else
+    return 0;
+#endif
+#endif
+
+    ifstream memInfo("/proc/meminfo");
+    if (!memInfo.is_open()) {
+        std::cerr << "Failed to open /proc/meminfo" << std::endl;
+#ifdef SYS_CAUTIOUS
+        exit(-1);
+#endif
+        return 0;
+    }
+
+    size_t totalMemory = 0;
+    size_t totalSwap = 0;
+    string line;
+    
+    while (getline(memInfo, line)) {
+        istringstream iss(line);
+        string key;
+        size_t value;
+
+        // Read the first word (key) and the second number (value)
+        if (iss >> key >> value) {
+            if (key == "MemTotal:") {
+                totalMemory = value;  // In KB
+                if(!includeSwap) break;
+            } else if (key == "SwapTotal:") {
+                totalSwap = value;  // In KB
+            }
+        }
+    }
+
+    // Close the file
+    memInfo.close();
+
+    // Return total memory considering the swap flag
+    return includeSwap? totalMemory + totalSwap : totalMemory;
+}
+
+    // Function to read and return the RSS and VM size of a process
+    static inline MemoryInfo getProcessMemoryInfo(pid_t pid) {
+        using namespace std;
+        
+        MemoryInfo memoryInfo{0, 0};
+        std::ifstream file("/proc/" + std::to_string(pid) + "/status");
+
+        if (!file.is_open()) {
+            std::cerr << "Error opening file for PID " << pid << std::endl;
+            return memoryInfo;
+        }
+
+        long rssSize    = -1;
+        long vmSize     = -1;
+        std::string line;
+
+        while (std::getline(file, line) && (rssSize == -1 || vmSize == -1)) {
+            // Search for VmSize and VmRSS in the file
+            if(std::sscanf(line.c_str(), "VmSize: %ld kB", &vmSize) == 1)
+                memoryInfo.vmSize = rssSize;
+            if(std::sscanf(line.c_str(), "VmRSS: %ld kB", &rssSize) == 1)
+                memoryInfo.rssSize = vmSize;
+        }
+        
+        file.close();
+        return memoryInfo;
+    }
+
 };
+
 
 } //namespace bench

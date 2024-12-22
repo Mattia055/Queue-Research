@@ -20,8 +20,8 @@ using namespace std;
 template<class T, class Segment>
 class LinkedRingQueue{
 private:
-    static constexpr int MAX_THREADS    = 128;
-    static constexpr size_t RING_SIZE   = 128; //setta la lunghezza per i segmenti
+    static constexpr size_t MAX_THREADS     = 128;
+    static constexpr size_t RING_SIZE       = 128; //setta la lunghezza per i segmenti
     static constexpr int kHpTail = 0;
     static constexpr int kHpHead = 1;
     const int maxThreads;
@@ -31,7 +31,7 @@ private:
     
     HazardPointers<Segment> HP;
 
-    //Funzione inline per garantire portabilità verso altre code
+    //Deprecated function
     inline T* dequeueAfterNextLinked(Segment* lhead, int tid) {
         return lhead->dequeue(tid);
     }
@@ -48,7 +48,7 @@ public:
 #ifndef DISABLE_HAZARD
     assert(maxThreads <= HazardPointers<Segment*>::MAX_THREADS); //assertion to assure no SIGSEGV
 #endif
-        Segment* sentinel = new Segment(0,Segment_Length);
+        Segment* sentinel = new Segment(Segment_Length);
         head.store(sentinel,std::memory_order_relaxed);
         tail.store(sentinel,std::memory_order_relaxed);
 
@@ -93,7 +93,8 @@ public:
             }
 
             //se l'inserimento non ha successo allora il Segmento è pieno, ne serve un altro
-            Segment* newTail = new Segment(ltail->getNextSegmentStartIndex(),Ring_Size);
+            Segment* newTail = new Segment(Ring_Size);
+            newTail->setStartIndex(ltail->getNextSegmentStartIndex());
             newTail->enqueue(item,tid);
 
             Segment* nullSegment = nullptr;
@@ -156,6 +157,10 @@ public:
 template <class T,class Segment>
 struct QueueSegmentBase {
 protected:
+
+    static constexpr size_t     RING_SIZE = 128;
+    static constexpr size_t     TRY_CLOSE = 10;
+
     alignas(CACHE_LINE) std::atomic<uint64_t> head{0};
     alignas(CACHE_LINE) std::atomic<uint64_t> tail{0};
     alignas(CACHE_LINE) std::atomic<Segment*> next{nullptr};
@@ -167,6 +172,11 @@ protected:
 
     static inline bool isClosed(uint64_t t) {
         return (t & (1ull<<63)) != 0;
+    }
+
+    inline void setStartIndex(uint64_t i){
+        head.store(i,std::memory_order_relaxed);
+        tail.store(i,std::memory_order_relaxed); 
     }
 
     void fixState() {
@@ -201,15 +211,15 @@ protected:
         return head.load() >= tailIndex(tail.load());
     }
 
-    inline uint64_t getHeadIndex() { 
+    inline uint64_t getHeadIndex() const { 
         return head.load(); 
     }
 
-    inline uint64_t getTailIndex() {
+    inline uint64_t getTailIndex() const {
         return tailIndex(tail.load());
     }
 
-    inline uint64_t getNextSegmentStartIndex() {
+    inline uint64_t getNextSegmentStartIndex() const {
         return getTailIndex() - 1; 
     }
 

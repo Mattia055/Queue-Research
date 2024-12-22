@@ -10,8 +10,6 @@ template <typename T, bool padded_cells, bool bounded>
 class CRQueue : public QueueSegmentBase<T, CRQueue<T, padded_cells, bounded>>
 {
 private:
-    static constexpr size_t RING_SIZE = 128;
-    static constexpr size_t TRY_CLOSE = 10;
 
     const size_t Ring_Size;
 
@@ -35,29 +33,27 @@ private:
         return i & (1ull << 63);
     }
 
-private:
-    CRQueue(uint64_t start, size_t Ring_Size) : Base(),
-                                                            Ring_Size{Ring_Size}
+public:
+    CRQueue(size_t Ring_Size=Base::RING_SIZE): Base(), Ring_Size{Ring_Size}
     {
         array = new Cell[Ring_Size];
-        for (uint64_t i = start; i < start + Ring_Size; i++)
+        for (uint64_t i = 0; i < Ring_Size; i++)
         {
             uint64_t j = i % Ring_Size;
             array[j].val.store(nullptr, std::memory_order_relaxed);
             array[j].idx.store(i, std::memory_order_relaxed);
         }
 
-        Base::head.store(start, std::memory_order_relaxed);
-        Base::tail.store(start, std::memory_order_relaxed);
+        Base::head.store(0, std::memory_order_relaxed);
+        Base::tail.store(0, std::memory_order_relaxed);
         
         Base::cluster.store(isNumaAvailable() ? getNumaNode() : 0, std::memory_order_relaxed);
     }
 
-public:
-    CRQueue(size_t Ring_Size=RING_SIZE): CRQueue(uint64_t(0),Ring_Size) {}
+    //Constructor to ensure protability with LinkedRing Variants
+    CRQueue(size_t threads, size_t Ring_Size): CRQueue(Ring_Size) {}
 
-    ~CRQueue()
-    {
+    ~CRQueue() {
         delete[] array;
     }
 
@@ -105,7 +101,7 @@ public:
                     return false;
                 }
                 else{
-                    if (Base::closeSegment(tailTicket, ++try_close > TRY_CLOSE))
+                    if (Base::closeSegment(tailTicket, ++try_close > Base::TRY_CLOSE))
                         return false;
                 }
             }
