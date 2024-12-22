@@ -7,14 +7,14 @@
 #include <iostream>
 #include <cstdlib>
 
-#include "BenchmarkUtils.hpp"
+#include "MemoryBenchmark.hpp"
 
-#define BATCH_SIZE 1000
+const size_t BATCH_SIZE = 100;
 
 int main(int argc, char **argv) {
+    using MemBench = bench::MemoryBenchmark;
     using namespace std;
     using namespace chrono;
-    using namespace bench;
 
     if (argc < 7) {
         cerr << "Usage: " << argv[0] << " <pid> <runDuration> <granularity> <file_name> <max_memory> <min_memory>\n";
@@ -37,15 +37,15 @@ int main(int argc, char **argv) {
     }
 
     // Append header if file is empty
-    if (notFile(file_name)) {
+    if (MemBench::notFile(file_name)) {
         file << "vmSize,rssSize,time\n";
     }
 
-    array<MemoryInfo, BATCH_SIZE> memorySnapshots;
-    MemoryInfo current;
+    array<MemBench::MemoryInfo, BATCH_SIZE> memorySnapshots;
+    MemBench::MemoryInfo current;
 
     // Monitor the memory before warmup
-    memorySnapshots[0] = getProcessMemoryInfo(pid);
+    memorySnapshots[0] = MemBench::getProcessMemoryInfo(pid);
 
     // Set signal mask
     sigset_t mask;
@@ -72,14 +72,14 @@ int main(int argc, char **argv) {
     for (size_t i = 0; i <= iterations; i++, iFile++) {
         if ((i + 1) % BATCH_SIZE == 0) {   // Write to file
             for (size_t j = 0; j < BATCH_SIZE; j++) {
-                MemoryInfo mem = memorySnapshots[j];
+                MemBench::MemoryInfo mem = memorySnapshots[j];
                 file << mem.vmSize << "," 
                      << mem.rssSize << "," 
                      << ((i + 1) - BATCH_SIZE + j) * granularity_count << "\n";
             }
         }
 
-        current = getProcessMemoryInfo(pid);
+        current = MemBench::getProcessMemoryInfo(pid);
         if (current.rssSize > max_memory) {
             kill(pid, SIGUSR1);
         } else if (current.rssSize < min_memory) {
@@ -102,7 +102,6 @@ int main(int argc, char **argv) {
 
     // Send SIGALRM to parent
     kill(pid, SIGALRM);
-    puts("GOT SIGALARM");
 
     return 0;
 }
