@@ -11,6 +11,7 @@ set(INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/include/benchmark
     ${CMAKE_SOURCE_DIR}/include/queues
+    ${CMAKE_SOURCE_DIR}/include/utils
 )
 
 # Required libraries
@@ -21,24 +22,27 @@ find_path(NUMA_INCLUDE_DIR numa.h)
 # Source files for the main executables
 set(MAIN_SRC
     src/main.cpp 
-    src/benchmark/BenchmarkUtils.cpp
     src/AdditionalWork.cpp
 )
 
 # Create executables
-add_executable(memoryManager src/benchmark/MemoryMonitor.cpp src/benchmark/BenchmarkUtils.cpp)
+add_executable(memoryManager src/benchmark/MemoryMonitor.cpp)
 add_executable(padding ${MAIN_SRC})
 add_executable(no_padding ${MAIN_SRC})
 add_executable(fsan ${MAIN_SRC})
 # Create the test executable
-add_executable(tests src/test.cpp)
+add_executable(testCases src/queueTestCases.cpp)
+
+add_executable(bench src/pc_benchmark.cpp)
+target_include_directories(bench PRIVATE ${INCLUDE_DIRS})
+target_compile_options(bench PRIVATE -O3)
 
 # Include directories for all executables
 target_include_directories(memoryManager PRIVATE ${INCLUDE_DIRS})
 target_include_directories(padding PRIVATE ${INCLUDE_DIRS})
 target_include_directories(no_padding PRIVATE ${INCLUDE_DIRS})
 target_include_directories(fsan PRIVATE ${INCLUDE_DIRS})
-target_include_directories(tests PRIVATE ${INCLUDE_DIRS})
+target_include_directories(testCases PRIVATE ${INCLUDE_DIRS})
 
 # Compile options
 target_compile_options(padding PUBLIC -O3)
@@ -54,12 +58,14 @@ if(NUMA_LIBRARY AND NUMA_INCLUDE_DIR)
   target_link_libraries(fsan PRIVATE -fsanitize=address numa)
   target_link_libraries(padding PRIVATE numa)
   target_link_libraries(no_padding PRIVATE numa)
-  target_link_libraries(tests PRIVATE numa)
+  target_link_libraries(testCases PRIVATE numa)
+  target_link_libraries(bench PRIVATE numa)
 else()
   target_compile_definitions(fsan PUBLIC DISABLE_NUMA)
   target_compile_definitions(padding PUBLIC DISABLE_NUMA)
   target_compile_definitions(no_padding PUBLIC DISABLE_NUMA)
-  target_compile_definitions(tests PUBLIC DISABLE_NUMA)
+  target_compile_definitions(testCases PUBLIC DISABLE_NUMA)
+  target_compile_definitions(bench PUBLIC DISABLE_NUMA)
 endif()
 
 # Uncomment the following lines if you need to link jemalloc
@@ -81,14 +87,14 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(googletest)
 
 # Link GoogleTest and pthread to the test executable
-target_compile_options(tests PRIVATE -fsanitize=address PUBLIC -g)
-target_link_libraries(tests PRIVATE GTest::gtest GTest::gmock pthread -fsanitize=address)
+target_compile_options(testCases PRIVATE -fsanitize=address PUBLIC -g)
+target_link_libraries(testCases PRIVATE GTest::gtest GTest::gmock pthread -fsanitize=address)
 
 # Include directories for the test executable
-target_include_directories(tests PRIVATE ${INCLUDE_DIRS} ${gtest_SOURCE_DIR}/googletest/include)
+target_include_directories(testCases PRIVATE ${INCLUDE_DIRS} ${gtest_SOURCE_DIR}/googletest/include)
 
 # Enable testing
 enable_testing()
 
 # Add a CMake test for running the tests
-add_test(NAME tests COMMAND tests)
+add_test(NAME testCases COMMAND testCases)
