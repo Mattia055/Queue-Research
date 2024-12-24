@@ -13,3 +13,4 @@
 
 using UnboundedQueues   = TemplateSet<FAAQueue,LCRQueue,LPRQueue,LinkedMuxQueue>;
 using BoundedQueues     = TemplateSet<BoundedCRQueue,BoundedPRQueue,BoundedMuxQueue>;
+using Queues            = UnboundedQueues::Cat<BoundedQueues>;

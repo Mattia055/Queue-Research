@@ -33,7 +33,7 @@ add_executable(fsan ${MAIN_SRC})
 # Create the test executable
 add_executable(testCases src/queueTestCases.cpp)
 
-add_executable(bench src/pc_benchmark.cpp)
+add_executable(bench src/pc_benchmark.cpp src/AdditionalWork.cpp)
 target_include_directories(bench PRIVATE ${INCLUDE_DIRS})
 target_compile_options(bench PRIVATE -O3)
 

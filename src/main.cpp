@@ -22,6 +22,18 @@ using namespace bench;
 
 int main(void)
 {
+
+    std::cout << "LCRQ -> " << LCRQueue<int>::className() << 
+                    "\nLPRQ -> " << LPRQueue<int>::className() << 
+                    "\nFAAArray -> " << FAAQueue<int>::className() << 
+                    "\nLinkedMuxQueue -> " << LinkedMuxQueue<int, false>::className() <<
+                    "\nBoundMuxQueue -> " << BoundedMuxQueue<int>::className() << 
+                    "\nBoundedCRQueue -> " << BoundedCRQueue<int>::className() <<
+                    "BoundedPRQueue -> " << BoundedPRQueue<int>::className() << std::endl;
+
+    return 0;
+
+
     // SymmetricBenchmark sym1(2, 0, 4096);
 
     // // Iterate through each template in the set

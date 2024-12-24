@@ -82,9 +82,9 @@ public:
         delete (int*)taken;
     }
 
-    static std::string className() {
+    static std::string className(bool padding = true) {
         using namespace std::string_literals;
-        return "FAAArrayQueue"s + (padded_cells ? "/padded" : "");
+        return "FAAArrayQueue"s + ((padded_cells && padding)? "/padded" : "");
     }
 
     size_t size(int tid) {
@@ -192,18 +192,16 @@ public:
         delete f;
     }
 
-    static std::string className() {
+    static std::string className(bool padding=true) {
         using namespace std::string_literals;
         // Using template specialization to check padded_cells at compile time
-        if constexpr (std::is_same_v<QueueType, FAAArrayQueue<T,true>>) {
-            return "FAAArrayQueue/padded";
-        } else {
-            return "FAAArrayQueue";
-        }
+        if constexpr (std::is_same_v<QueueType, FAAArrayQueue<T,true>> == false)
+            padding = false;
+        
+        return "FAAQueue"s + (padding ? "/padded" : "");
     }
 
     size_t size(int tid) { return f->size(tid); }
-
     inline void enqueue(T* item, const int tid) { return f->enqueue(item, tid); }
     inline T* dequeue(const int tid) { return f->dequeue(tid);}
 };

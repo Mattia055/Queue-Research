@@ -59,8 +59,8 @@ public:
         delete head.load(); //elimina il primo Segment;
     }
 
-    static std::string className(){
-        return "Linked" + Segment::className();
+    static std::string className(bool padding = true){
+        return "Linked" + Segment::className(padding);
     }
 
     inline void enqueue(T* item, int tid){

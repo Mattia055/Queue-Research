@@ -17,27 +17,24 @@ using namespace chrono;
 namespace bench {
 
 class ProdConsBenchmark: public Benchmark{
-private:
-    static constexpr size_t WARMUP      = 1'000'000ULL;
-    static constexpr size_t RINGSIZE    = 4096;
 public:
     size_t producers, consumers;
-    size_t warmup;
-    size_t ringSize;
+    size_t warmup=WARMUP;
+    size_t ringSize=RINGSIZE; 
     double additionalWork;
     double producerAdditionalWork;
     double consumerAdditionalWork;
     bool balancedLoad;
-    Arguments   flags;
+    Arguments   flags = Arguments();
 
 public:
     ProdConsBenchmark(  size_t numProducers,
                         size_t numConsumers,
                         double additionalWork,
                         bool balancedLoad,
-                        size_t ringSize = RINGSIZE,
-                        size_t warmup = WARMUP,
-                        Arguments args = Arguments()
+                        size_t ringSize=RINGSIZE,
+                        size_t warmup=WARMUP,
+                        Arguments args=Arguments()
                     ):
     producers{numProducers},
     consumers{numConsumers},

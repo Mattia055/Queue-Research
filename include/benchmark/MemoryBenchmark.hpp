@@ -51,44 +51,44 @@ public:
     };
 
     struct MemoryArguments {
+        bool memoryThreshold = false;
+        size_t max_memory = getTotalMemory(false) / 3 * 2;
+        size_t min_memory = 0;
+        milliseconds supSleep = 100ms;  //producers sleep if max_memory is reached
+        milliseconds infSleep = 100ms;  //consumers sleep if min_memory is reached
+        short synchro = 0;      //Bitmask for synchro
+        //If synchro = 0 then all the following are ignored [default]
+        milliseconds producerInitialDelay;
+        milliseconds consumerInitialDelay;
+        milliseconds producerSleep; //should be multiple of granularity
+        milliseconds producerUptime;
+        milliseconds consumerSleep;
+        milliseconds consumerUptime;
 
-    size_t max_memory;
-    size_t min_memory;
-    milliseconds supSleep;  //producers sleep if max_memory is reached
-    milliseconds infSleep;  //consumers sleep if min_memory is reached
-    short synchro;         //Bitmask for synchro
-    milliseconds producerInitialDelay;
-    milliseconds consumerInitialDelay;
-    milliseconds producerSleep; //should be multiple of granularity
-    milliseconds producerUptime;
-    milliseconds consumerSleep;
-    milliseconds consumerUptime;
+        MemoryArguments(){
+            memoryThreshold = false;
+            max_memory = getTotalMemory(false) / 3 * 2;
+            min_memory = 0;
+            supSleep = 100ms;
+            infSleep = 100ms;
+            synchro = 0;
+        }
 
-    
-    MemoryArguments(    milliseconds supSleepProducer = 100ms,
-                        milliseconds infSleepConsumer = 100ms,
-                        size_t max = getTotalMemory(false) / 3 * 2,
-                        size_t min = 0
-                    )
-    :   max_memory{max}, min_memory{min}, supSleep{supSleepProducer}, 
-        infSleep{infSleepConsumer}, synchro{0} 
-    {}
-
-};
+    };
 
 
     static constexpr short SYNC_PRODS   = 1;
     static constexpr short SYNC_CONS    = 2;
 
     size_t producers, consumers;
-    size_t warmup;
-    size_t ringSize;
+    size_t warmup=WARMUP;
+    size_t ringSize=RINGSIZE;
     double additionalWork;
     double producerAdditionalWork;
     double consumerAdditionalWork;
     bool balancedLoad;
-    Arguments   flags;
-    MemoryArguments memoryFlags;
+    Arguments   flags=Arguments();
+    MemoryArguments memoryFlags=MemoryArguments();
 
     MemoryBenchmark(    size_t numProducers, size_t numConsumers, double additionalWork,
                         bool balancedLoad, size_t ringSize = RINGSIZE, 
@@ -239,7 +239,6 @@ private:
                     for(int i = 0; i< GRANULARITY; i++){
                         if(i % 31 == 0){
                             if(stopFlag.load()){
-                                puts("CONSUMER OUT");
                                 return;
                             }
                             if(consumerFlag.load() == sleepFlag){
@@ -325,6 +324,7 @@ private:
                         fileName.c_str(),                               //filename
                         std::to_string(memoryFlags.max_memory).c_str(), //max memory
                         std::to_string(memoryFlags.min_memory).c_str(), //min memory
+                        memoryFlags.memoryThreshold ? "1" : "0",        //memory threshold
                         (char *)NULL) == -1)
             {
                 std::cerr << "execl() failed: " << std::strerror(errno) << std::endl;
@@ -369,9 +369,8 @@ private:
             int sig;
             do{
                 sigwait(&mask, &sig);
-                if(sig == SIGUSR1){
+                if(sig == SIGUSR1)
                     producerFlag.fetch_add(1);
-                }
                 else if(sig == SIGUSR2){
                     consumerFlag.fetch_add(1);
             }

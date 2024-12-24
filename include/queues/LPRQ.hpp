@@ -56,9 +56,9 @@ public:
         delete[] array;
     }
 
-    static std::string className() {
+    static std::string className(bool padding = true) {
         using namespace std::string_literals;
-        return (bounded? "Bounded"s : ""s ) + "PRQueue"s + (padded_cells ? "/padded":"");
+        return (bounded? "Bounded"s : ""s ) + "PRQueue"s + ((padded_cells && padding)? "/padded":"");
     }
 
     bool enqueue(T* item,[[maybe_unused]] const int tid) {

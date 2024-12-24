@@ -4,7 +4,13 @@
 #include <fstream>
 #include <sys/stat.h>
 #include <iostream>
+#include <string>
+#include <unordered_map>
 #include "Stats.hpp"
+
+
+#define __delim_1 ':'
+#define __delim_2 ','
 
 
 namespace bench{
@@ -13,11 +19,59 @@ using namespace std;
 using namespace chrono;
 
 class Benchmark{
-
 protected:
     static constexpr uint64_t NSEC_SEC = 1'000'000'000ULL;
     static constexpr uint64_t WARMUP = 1'000'000UL;
     static constexpr uint64_t RINGSIZE = 4096;
+
+struct Format {
+    string file             = "file";
+    string threads          = "threads";
+    string producers        = "producers";
+    string consumers        = "consumers";
+    string iterations       = "iterations";
+    string runs             = "runs";
+    string duration         = "duration_sec";
+    string granularity      = "granularity_msec";
+    string warmup           = "warmup";
+    string additionalWork   = "additionalWork";
+    string queueFilter      = "queues";
+    string Arguments        = "flags";
+    string memoryArgs       = "memoryArgs";
+    string balanced         = "balanced";
+
+    Format(){}; //default init
+    static unordered_map<string,string> getFormatMap(int argc, char **argv){
+        unordered_map<string,string> formatMap;
+        //Ignore the first argument
+        for(int i = 1; i< argc; i++){
+            string arg = argv[i];
+            size_t pos = arg.find(__delim_1);
+            formatMap[arg.substr(0,pos)] = arg.substr(pos+1);
+        }
+        return formatMap;
+    }
+
+    // Template function to split the string and cast elements to the given type
+    template <typename T>
+    static std::vector<T> split(const std::string input, char delimiter=__delim_2) {
+        std::istringstream stream(input);
+        std::string item;
+        std::vector<T> result;
+        while (std::getline(stream, item, delimiter)) {
+            // Cast the item to the specified type
+            std::istringstream item_stream(item);
+            T value;
+            item_stream >> value;
+            if (item_stream.fail()) 
+                throw std::invalid_argument("Failed to cast item: " + item);
+            
+            result.push_back(value);
+        }
+
+        return result;
+    }
+};
 
 
 

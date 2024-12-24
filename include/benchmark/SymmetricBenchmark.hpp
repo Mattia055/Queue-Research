@@ -58,28 +58,25 @@ public:
 
 public:
     Arguments flags;
-    static constexpr size_t WARMUP      = 1'000'000UL;
-    static constexpr size_t RINGSIZE    = 4096; 
-
-private:
-
     size_t threads;
-    size_t ringSize;
-    size_t warmup;
+    size_t ringSize = RINGSIZE;
+    size_t warmup = WARMUP;
     double additionalWork;
-
-public:
 
     SymmetricBenchmark( size_t threads, 
                         double additionalWork, 
-                        size_t ringSz = RINGSIZE,
-                        size_t warmup = WARMUP, 
-                        Arguments flags = Arguments()):
+                        size_t ringSz,
+                        size_t warmup, 
+                        Arguments flags):
     threads{threads},
     additionalWork{additionalWork},
     ringSize{ringSz},
     warmup{warmup},
     flags{flags} {};
+
+    SymmetricBenchmark( size_t threads,
+                        double additionalWork):
+    threads{threads},additionalWork{additionalWork}{}; 
 
     ~SymmetricBenchmark(){};
 
