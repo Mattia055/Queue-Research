@@ -50,32 +50,6 @@ public:
         long rssSize = 0; // RSS size in KB
     };
 
-    struct MemoryArguments {
-        bool memoryThreshold = false;
-        size_t max_memory = getTotalMemory(false) / 3 * 2;
-        size_t min_memory = 0;
-        milliseconds supSleep = 100ms;  //producers sleep if max_memory is reached
-        milliseconds infSleep = 100ms;  //consumers sleep if min_memory is reached
-        short synchro = 0;      //Bitmask for synchro
-        //If synchro = 0 then all the following are ignored [default]
-        milliseconds producerInitialDelay;
-        milliseconds consumerInitialDelay;
-        milliseconds producerSleep; //should be multiple of granularity
-        milliseconds producerUptime;
-        milliseconds consumerSleep;
-        milliseconds consumerUptime;
-
-        MemoryArguments(){
-            memoryThreshold = false;
-            max_memory = getTotalMemory(false) / 3 * 2;
-            min_memory = 0;
-            supSleep = 100ms;
-            infSleep = 100ms;
-            synchro = 0;
-        }
-
-    };
-
 
     static constexpr short SYNC_PRODS   = 1;
     static constexpr short SYNC_CONS    = 2;

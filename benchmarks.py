@@ -5,6 +5,7 @@ import json,os,subprocess,argparse
 PADDED_PATH = "build/bench"
 UNPADDED_PATH = "unpadded"
 DELIM = ","
+NULL_ARG = "NULL"
 
 def strerror(message:str):
     print(message)
@@ -147,6 +148,7 @@ OPTIONAL_PROD_CONS  = {"balanced"}
     iterations : int, list int
     queues  : str, list str
     warmup  : int, list int | nullable
+    balanced : bool | nullable [False]
     additionalWork: float, list float | nullable [set 0]
     flags   : subset{"output","progress","overwrite"} str | list str
     memoryArgs : dict #if MemoryBenchmark
@@ -220,7 +222,7 @@ def parseBenchmark(benchmark:dict) -> list :
     
     for key in optional:
         if benchmark.get(key) is None:
-            benchmark[key] = "NULL"
+            benchmark[key] = NULL_ARG
         else:
             match key:
                 case "flags":
@@ -232,15 +234,19 @@ def parseBenchmark(benchmark:dict) -> list :
                     if type(arg) is int: arg = [arg]
                     #Check for uniform type and positive values
                     if type(arg) is not list or any((type(i) is not int or i <= 0) for i in arg):
-                        strerror(f"Invalid {key} type: {arg}")
+                        strerror(f"Invalid {key} value: {arg}")
                     benchmark[key] = DELIM.join(list(map(str,arg)))
                 case "additionalWork":
                     arg = benchmark[key]
                     if type(arg) in {float,int}: arg = [arg]
                     #Check for uniform type and positive values
                     if type(arg) is not list or any((type(i) not in {float,int} or i < 0) for i in arg):
-                        strerror(f"Invalid {key} type: {arg}")
+                        strerror(f"Invalid {key} value: {arg}")
                     benchmark[key] = DELIM.join(list(map(str,arg)))
+                case "balanced":
+                    if type(benchmark[key]) is not bool:
+                        strerror(f"Invalid {key} value: {benchmark[key]}")
+                    benchmark[key] = "1" if benchmark[key] else "0"
     
     #This order to make easier to parse arguments in the c++ program
     parsed  =   ["benchmark","queues","file"] 
