@@ -37,10 +37,30 @@ struct TemplateSet {
     template <typename OtherSet>
     using Cat = typename CatImpl<OtherSet>::Type;
 
-    // Apply a function to each template in the set
     template <typename F>
-    static constexpr void foreach(F func) {
-        // Apply the function to each wrapped template
+    static constexpr void foreach(F&& func) {
+        // Use a fold expression to iterate over the Templates
         (func.template operator()<Templates>(), ...);
     }
+
+    template <template <typename> typename Query>
+    struct ContainsHelper {
+        // Helper to check if the Wrapper matches Query
+        template <typename T>
+        static constexpr bool is_match() {
+            return std::is_same_v<Wrapper<Query>, T>;
+        }
+
+        // Use std::tuple to iterate over WrappedTemplates
+        static constexpr bool value = [] {
+            bool result = false;
+            std::apply([&result](auto... elements) {
+                ((result = result || is_match<decltype(elements)>()), ...);
+            }, WrappedTemplates{});
+            return result;
+        }();
+    };
+
+    template <template <typename> typename Query>
+    static constexpr bool Contains = ContainsHelper<Query>::value;
 };

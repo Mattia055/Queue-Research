@@ -9,13 +9,6 @@ using namespace std;
 
 #ifndef DISABLE_HAZARD
 
-// #ifndef STATIC_HAZARD
-// #define STATIC_HAZARD //Dynamic Hazard doesn't work
-// #endif
-#ifndef STATIC_HAZARD
-#define STATIC_HAZARD
-#endif
-
 #ifndef CACHE_LINE
 #define CACHE_LINE 64
 #endif
@@ -34,13 +27,8 @@ private:
     const int maxThreads;
 
     //moltiplica per CACHE_LINE (molte celle vuote) ma no false sharing
-#ifdef STATIC_HAZARD
     std::atomic<T*> Hazard [MAX_THREADS * CLPAD][MAX_HP_PER_THREAD];
     std::vector<T*> Retired[MAX_THREADS * CLPAD];
-#else
-    std::atomic<T*> **Hazard;
-    std::vector<T*> *Retired;
-#endif
 
 public:
     //constructor
@@ -48,18 +36,6 @@ public:
     maxHPs{maxHPs},
     maxThreads{maxThreads}
     {
-
-    
-
-#ifndef STATIC_HAZARD //Inizializza la memoria dinamica
-    Hazard      = new std::atomic<T*>*  [maxThreads * CLPAD];
-    Retired     = new std::vector<T*>   [maxThreads * CLPAD]; 
-    for(int i = 0; i< maxThreads; i++){
-        Hazard[i*CLPAD] = new std::atomic<T*>[maxHPs];
-    }
-
-    std::cout << "Dynamic" << std::endl;
-#endif
 
         for(int iThread = 0; iThread < maxThreads; iThread++){
             for(int iHP = 0; iHP < maxHPs; iHP++){
@@ -71,25 +47,11 @@ public:
     //destructor
     ~HazardPointers() 
     {
-#ifndef STATIC_HAZARD
-        for(int i = 0; i< maxThreads; ++i){
-            delete[] Hazard[i*CLPAD];
-        }
-        delete[] Hazard;
-
-        for(int iThread = 0; iThread < maxThreads; iThread++){
-            for(unsigned iRet = 0; iRet<Retired[iThread*CLPAD].size();iRet++){
-                delete Retired[iThread * CLPAD][iRet];
-            }
-        }
-        delete[] Retired;
-#else
         for(int iThread = 0; iThread < MAX_THREADS; iThread++){
             for(unsigned iRet = 0; iRet < Retired[iThread*CLPAD].size(); iRet++){
                 delete Retired[iThread * CLPAD][iRet];
             }
         }
-#endif
     }
 
     /**

@@ -27,6 +27,10 @@ public:
     MuxQueue(size_t maxThreads, size_t max_size):max_size{max_size}{};
     ~MuxQueue(){};
 
+    inline size_t RingSize() const { 
+        return max_size; 
+    }
+
     size_t size([[maybe_unused]] const int tid){
         return size();
     }
@@ -36,11 +40,11 @@ public:
         return muxQueue.size();
     }
 
-    static inline std::string className(){
+    static inline std::string className([[maybe_unused]] bool padding=true){
         return "BoundedMuxQueue";
     }
 
-    inline bool enqueue(T* item,[[maybe_unused]] const int tid){
+    __attribute__((used,always_inline)) bool enqueue(T* item,[[maybe_unused]] const int tid){
         std::lock_guard<std::mutex> lock(mux);
         if constexpr (bounded){
             if(muxQueue.size() >= max_size) return false;
@@ -49,7 +53,7 @@ public:
         return true;
     }
 
-    inline T* dequeue([[maybe_unused]] const int tid){
+    __attribute__((used,always_inline)) T* dequeue([[maybe_unused]] const int tid){
         T* item;
         lock_guard<mutex> lock(mux);
         if(!muxQueue.empty()){
@@ -72,12 +76,12 @@ public:
     ~MuxLinkedAdapter(){
         delete m;
     }
-    static inline std::string className(){
+    static inline std::string className([[maybe_unused]]bool padding=true){
         return "LinkedMuxQueue";
     }
     inline size_t size(int tid){return m->size(tid);}
-    inline void enqueue(T* item, const int tid){m->enqueue(item,tid);}
-    inline T* dequeue(const int tid){return m->dequeue(tid);};
+    __attribute__((used,always_inline)) void enqueue(T* item, const int tid){m->enqueue(item,tid);}
+    __attribute__((used,always_inline)) T* dequeue(const int tid){return m->dequeue(tid);};
 };
 
 template<typename T,bool bounded=true>

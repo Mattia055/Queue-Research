@@ -5,14 +5,15 @@
 #include <cstddef>  // For alignas
 #include <cassert>
 #include <atomic>
+#include <chrono>   //For NUMA Timeout
 #include "numa_support.hpp"
 
 #ifndef CACHE_LINE
 #define CACHE_LINE 64
 #endif
 
-#ifndef TRY_CHANGE_CLUSTER
-#define TRY_CHANGE_CLUSTER 100
+#ifndef CLUSTER_TIMEOUT //microseconds
+#define CLUSTER_TIMEOUT 100
 #endif
 
 using namespace std;
@@ -63,7 +64,7 @@ public:
         return "Linked" + Segment::className(padding);
     }
 
-    inline void enqueue(T* item, int tid){
+    __attribute__((used,always_inline)) void enqueue(T* item, int tid){
         if(item == nullptr)
             throw std::invalid_argument("item cannot be null pointer");
         
@@ -111,7 +112,7 @@ public:
         }
     }
 
-    inline T* dequeue(int tid) {
+    __attribute__((used,always_inline)) T* dequeue(int tid) {
         Segment* lhead = HP.protect(kHpHead,head.load(),tid);
         while(true){
 #ifndef DISABLE_HAZARD
@@ -164,7 +165,7 @@ protected:
     alignas(CACHE_LINE) std::atomic<uint64_t> head{0};
     alignas(CACHE_LINE) std::atomic<uint64_t> tail{0};
     alignas(CACHE_LINE) std::atomic<Segment*> next{nullptr};
-    alignas(CACHE_LINE) std::atomic<uint64_t> cluster{0};   //most operations should be on the same cluster
+    alignas(CACHE_LINE) std::atomic<uint64_t> cluster{};   //most operations should be on the same cluster
 
     static inline uint64_t tailIndex(uint64_t t) {
         return (t & ~(1ull << 63));
@@ -223,22 +224,21 @@ protected:
         return getTailIndex() - 1; 
     }
 
-#ifdef DISABLE_NUMA
-    inline bool safeCluster(bool force){
-        int i = 0;
-        while(!force && (i++ < TRY_CHANGE_CLUSTER)){
-            if(cluster.load() == getNumaNode()) return true;
-        }
+#ifndef DISABLE_NUMA
+    __attribute__((used,always_inline)) bool safeCluster(){
         do{
             uint64_t c = cluster.load();
-            if(Base::cluster.compare_exchange_weak(c,getNumaNode()))
-                return true;
-        }while(!force);
+            if(c != getNumaNode()){
+                this_thread::sleep_for(std::chrono::microseconds(CLUSTER_TIMEOUT));
+                if(!cluster.compare_exchange_strong(c,getNumaNode()))
+                    continue;
+            } 
+            return true;
 
-        return false;
+        }while(true);
     }
 #else
-    inline bool safeCluster(bool force){return true;}
+    inline bool safeCluster(){return true;}
 #endif
 
 

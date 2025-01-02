@@ -16,8 +16,8 @@ int main(int argc, char **argv) {
     using namespace std;
     using namespace chrono;
 
-    if (argc < 8) {
-        cerr << "Usage: " << argv[0] << " <pid> <runDuration> <granularity> <file_name> <max_memory> <min_memory> <memoryThreshold>\n";
+    if (argc != 8) {
+        cerr << "Usage: " << argv[0] << " <pid> <runDuration> <granularity> <file_name> <max_memory> <min_memory> <monitor>\n";
         return 1;
     }
 
@@ -26,9 +26,9 @@ int main(int argc, char **argv) {
     seconds runDuration = seconds(stoi(argv[2]));
     milliseconds granularity = milliseconds(stoi(argv[3]));
     string file_name = argv[4];
-    size_t max_memory = static_cast<size_t>(stol(argv[5]));
-    size_t min_memory = static_cast<size_t>(stol(argv[6]));
-    bool memoryThreshold = static_cast<bool>(stoi(argv[7]));
+    size_t max_memory = (stol(argv[5]));
+    size_t min_memory = (stol(argv[6]));
+    bool monitor = (stoi(argv[7]));
 
     // Open file
     ofstream file(file_name, ios::app);
@@ -79,14 +79,12 @@ int main(int argc, char **argv) {
                      << ((i + 1) - BATCH_SIZE + j) * granularity_count << "\n";
             }
         }
-
         current = MemBench::getProcessMemoryInfo(pid);
-        if(memoryThreshold){
         if (current.rssSize > max_memory)
             kill(pid, SIGUSR1);
         else if (current.rssSize < min_memory)
             kill(pid, SIGUSR2);
-        }
+            
         memorySnapshots[i % BATCH_SIZE] = current;
         std::this_thread::sleep_for(granularity);
     }

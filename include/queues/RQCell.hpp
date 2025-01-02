@@ -19,6 +19,17 @@
 
 namespace detail{
 
+inline bool isPowTwo(size_t x){
+    return (x != 0 && (x & (x-1)) == 0);
+}
+
+inline size_t nextPowTwo(size_t x){
+    if(isPowTwo(x)) return x;
+    size_t p=1;
+    while (x>p) p <<= 1;
+    return p;
+}
+
 template<class, bool padded>
 struct CRQCell;
 

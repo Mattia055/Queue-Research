@@ -1,15 +1,14 @@
 #pragma once
-
 #ifndef DISABLE_NUMA
-#ifdef __has_include
-#if __has_include(<numa.h>)
-#include <numa.h>
-#include <pthread.h>
-#else
-#define DISABLE_NUMA
-#warning "numa_ctrl not found, NUMA support will be disabled"
-#endif
-#endif
+    #ifdef __has_include
+        #if __has_include(<numa.h>)
+            #include <numa.h>
+            #include <pthread.h>
+        #else
+            #define DISABLE_NUMA
+            #warning "numa_ctrl not found, NUMA support will be disabled"
+        #endif
+    #endif
 #endif
 
 

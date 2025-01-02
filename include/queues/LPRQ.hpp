@@ -12,6 +12,9 @@ private:
     
     Cell* array; 
     const size_t Ring_Size;
+#ifndef DISABLE_POWTWO_SIZE
+    const size_t mask;  //Mask to execute the modulo operation
+#endif
 
     inline uint64_t nodeIndex(uint64_t i) const {
         return (i & ~(1ull << 63));
@@ -34,19 +37,30 @@ private:
     }
 
 public:
-    PRQueue(size_t Ring_Size=Base::RING_SIZE):
+    PRQueue(size_t RingSize=Base::RING_SIZE):
     Base(),
-    Ring_Size{Ring_Size}
+#ifndef DISABLE_POWTWO_SIZE
+    Ring_Size{detail::nextPowTwo(RingSize)},
+    mask{Ring_Size - 1}
+#else
+    Ring_Size{RingSize}
+#endif
     {
         array = new Cell[Ring_Size];
         for(uint64_t i = 0; i < Ring_Size; i++) { 
+#ifndef DISABLE_POWTWO_SIZE
+            uint64_t j = i & mask;
+#else
             uint64_t j = i % Ring_Size;
+#endif
             array[j].val.store(nullptr,std::memory_order_relaxed);
             array[j].idx.store(i,std::memory_order_relaxed);
         }
 
         Base::head.store(0,std::memory_order_relaxed);
         Base::tail.store(0,std::memory_order_relaxed);
+
+        Base::cluster.store(isNumaAvailable() ? getNumaNode() : 0, std::memory_order_relaxed);
     }
 
     //Constructor to ensure protability with LinkedRing Variants
@@ -61,12 +75,12 @@ public:
         return (bounded? "Bounded"s : ""s ) + "PRQueue"s + ((padded_cells && padding)? "/padded":"");
     }
 
-    bool enqueue(T* item,[[maybe_unused]] const int tid) {
+    __attribute__((used,always_inline)) bool enqueue(T* item,[[maybe_unused]] const int tid) {
         int try_close = 0;
     
         while(true) {
 
-            while(!Base::safeCluster(false));
+            Base::safeCluster();
 
             uint64_t tailTicket = Base::tail.fetch_add(1);
             
@@ -75,8 +89,11 @@ public:
                     return false;
                 }
             }
-
+#ifndef DISABLE_POWTWO_SIZE
+            Cell& cell = array[tailTicket & mask];
+#else
             Cell& cell = array[tailTicket % Ring_Size];
+#endif
             uint64_t idx = cell.idx.load();
             void* val = cell.val.load();
 
@@ -109,17 +126,21 @@ public:
         }
     }
 
-    T* dequeue([[maybe_unused]] const int tid) {
+    __attribute__((used,always_inline)) T* dequeue([[maybe_unused]] const int tid) {
 #ifdef CAUTIOUS_DEQUEUE
         if(Base::isEmpty())
             return nullptr;
 #endif
         while(true) {
 
-            while(!Base::safeCluster(false));
+            Base::safeCluster();
 
             uint64_t headTicket = Base::head.fetch_add(1);
+#ifndef DISABLE_POWTWO_SIZE
+            Cell& cell = array[headTicket & mask];
+#else
             Cell& cell = array[headTicket % Ring_Size];
+#endif
 
             int r = 0;
             uint64_t tt = 0;
@@ -165,6 +186,10 @@ public:
                 return nullptr;
             }
         }
+    }
+
+    inline size_t RingSize() const { 
+        return Ring_Size; 
     }
 
     inline size_t size() const {

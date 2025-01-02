@@ -10,9 +10,11 @@
 #include <cassert>
 
 #include "Benchmark.hpp"        //  for benchmarking Base Class
+#include "ThreadGroup.hpp"      //  for thread management
 #include "Stats.hpp"            //  for average and stddev computation
-#include "ThreadGroup.hpp"      //  for thread scheduling
 #include "AdditionalWork.hpp"   //  Additional Work by threads
+#include "Format.hpp"
+#include "QueueTypeSet.hpp"
 
 using namespace std;
 using namespace chrono;
@@ -68,16 +70,14 @@ public:
                         size_t ringSz,
                         size_t warmup, 
                         Arguments flags):
-    threads{threads},
-    additionalWork{additionalWork},
-    ringSize{ringSz},
-    warmup{warmup},
-    flags{flags} {};
+    threads{threads}, additionalWork{additionalWork}, ringSize{ringSz}, warmup{warmup}, flags{flags} {
+        assert(threads > 0);
+        assert(ringSize > 0);
+    }
 
-    SymmetricBenchmark( size_t threads,
-                        double additionalWork):
-    threads{threads},additionalWork{additionalWork}{}; 
-
+    SymmetricBenchmark( size_t threads, double additionalWork){
+        SymmetricBenchmark(threads,additionalWork,RINGSIZE,WARMUP,Arguments());
+    };
     ~SymmetricBenchmark(){};
 
     static string toString(){
@@ -115,33 +115,44 @@ public:
 private:
     template<template<typename> typename Q>
     vector<long double>__EnqDeqBenchmark(const size_t IterNum, const size_t numRuns){
-        assert(IterNum / threads > 0);
         nanoseconds deltas[threads][numRuns];
         barrier<> barrier(threads + 1);
         Q<UserData>* queue = nullptr;
+        size_t IterPerThread = IterNum / threads;
+        size_t WarmupPerThread = warmup / threads;
+
+        bool constexpr bounded = BoundedQueues::Contains<Q>;
 
         //Threads Routine
-        const auto lambda = [this,&IterNum, &queue,&barrier](const int tid) {
+        const auto lambda = [this,IterPerThread,WarmupPerThread, &queue,&barrier](const int tid) {
             UserData ud{};
             barrier.arrive_and_wait();
-            
-            //Warmup Iterations
-            for(size_t iW = 0; iW < warmup/threads;++iW){
-                queue->enqueue(&ud,tid);
-                if(queue->dequeue(tid) == nullptr) 
-                    cerr << "Error at warmup iteration: "<< iW << endl;
+            //Warmup
+            for(size_t iW = 0; iW <WarmupPerThread;++iW){
+                if constexpr(bounded){
+                    while(!queue->enqueue(&ud,tid));
+                    while(queue->dequeue(tid) == nullptr);
+                }
+                else{
+                    queue->enqueue(&ud,tid);
+                    queue->dequeue(tid);
+                }
             }
 
             barrier.arrive_and_wait();
             
             //Measuration
             auto startBeat = steady_clock::now();
-            for(size_t iter = 0; iter < IterNum / threads; ++iter) {
-                queue->enqueue(&ud,tid);
+            for(size_t iter = 0 ; iter < IterPerThread; ++iter) {
+                if constexpr(bounded){
+                    while(!queue->enqueue(&ud,tid));
+                }
+                else{
+                    queue->enqueue(&ud,tid);
+                }
                 random_additional_work(additionalWork);
                 if(queue->dequeue(tid) == nullptr)
-                    cerr << "Error at measurement iteration: " << iter << endl;
-                random_additional_work(additionalWork);
+                cout << "Error at measuration iter " << iter << endl;
             }
             auto stopBeat = steady_clock::now();
 
@@ -169,22 +180,26 @@ private:
                 opsPerSec[iRun] = static_cast<long double>(IterNum * 2 * (NSEC_SEC) * threads) / agg.count();
             }
         }
-
         return opsPerSec;
 
     }
 
 public:
     template<template<typename> typename Q>
-    static void ThroughputGrid( std::string csvFileName,
-                                const vector<size_t>& threadSet,
-                                const vector<size_t>& sizeSet,
-                                const vector<double>& workSet,
-                                const vector<size_t>& warmupSet,
-                                const size_t IterNum,
-                                const size_t numRuns,
-                                const Arguments args=Arguments())
+    static void runSeries  (const std::string csvFileName,
+                            const vector<size_t> threadSet,
+                                  vector<size_t> sizeSet,
+                                  vector<double> workSet,
+                                  vector<size_t> warmupSet,
+                            const size_t IterNum,
+                            const size_t numRuns,
+                            const Arguments args=Arguments())
     {
+        //CHECK ARGS
+        if(sizeSet.empty())     sizeSet     = {RINGSIZE};
+        if(warmupSet.empty())   warmupSet   = {WARMUP};
+        if(workSet.empty())     workSet     = {0.0};
+
         //CSV-HEADER
         bool header = args._overwrite || notFile(csvFileName);
         ofstream csvFile(csvFileName,header? ios::trunc : ios::app);
@@ -199,7 +214,7 @@ public:
             for(size_t nThreads: threadSet) {
                 for(size_t queueSize : sizeSet) {
                     for(size_t warmup : warmupSet){
-                        SymmetricBenchmark bench(nThreads,queueSize,additionalWork,warmup,args);
+                        SymmetricBenchmark bench(nThreads,additionalWork,queueSize,warmup,args);
                         std::vector<long double> result = bench.__EnqDeqBenchmark<Q>(IterNum,numRuns);
                         Stats<long double> sts = stats(result.begin(),result.end());
                         ThroughputCSVData(  csvFile,
@@ -222,6 +237,21 @@ public:
             }
         }
     }
+
+    static void runSeries   (Format format){
+        for(string q : format.queueFilter){
+            Queues::foreach([&format,&q]<template <typename> typename Q>() {
+                string queue = Q<int>::className(false);
+                    if(q == queue){
+                        runSeries<Q>(   format.path,
+                                        format.threads,
+                                        format.sizes,format.additionalWork,format.warmup,format.iterations,format.runs,format.args);
+                    }
+            });
+        }
+    }
+
+
 };
 
 }

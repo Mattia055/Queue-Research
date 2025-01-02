@@ -5,6 +5,10 @@
 #include "RQCell.hpp"
 #include "x86Atomics.hpp"
 
+//POWER_OF_TWO RING_SIZE
+
+
+
 
 template <typename T, bool padded_cells, bool bounded>
 class CRQueue : public QueueSegmentBase<T, CRQueue<T, padded_cells, bounded>>
@@ -12,6 +16,9 @@ class CRQueue : public QueueSegmentBase<T, CRQueue<T, padded_cells, bounded>>
 private:
 
     const size_t Ring_Size;
+#ifndef DISABLE_POWTWO_SIZE
+    const size_t mask;  //Mask to execute the modulo operation
+#endif
 
     using Base = QueueSegmentBase<T, CRQueue<T, padded_cells, bounded>>;
     using Cell = detail::CRQCell<T *, padded_cells>;
@@ -34,12 +41,25 @@ private:
     }
 
 public:
-    CRQueue(size_t Ring_Size=Base::RING_SIZE): Base(), Ring_Size{Ring_Size}
+    CRQueue(size_t RingSize=Base::RING_SIZE): 
+    Base(), 
+#ifndef DISABLE_POWTWO_SIZE
+    Ring_Size{detail::nextPowTwo(RingSize)},
+    mask{Ring_Size - 1}
+#else
+    Ring_Size{RingSize}
+#endif
     {
+        if(Ring_Size == 0)
+            throw std::invalid_argument("Ring Size must be greater than 0");
         array = new Cell[Ring_Size];
         for (uint64_t i = 0; i < Ring_Size; i++)
         {
+#ifndef DISABLE_POWTWO_SIZE
+            uint64_t j = i & mask;
+#else 
             uint64_t j = i % Ring_Size;
+#endif
             array[j].val.store(nullptr, std::memory_order_relaxed);
             array[j].idx.store(i, std::memory_order_relaxed);
         }
@@ -63,13 +83,13 @@ public:
         return (bounded? "Bounded"s : ""s ) + "CRQueue"s + ((padded_cells && padding)? "/padded" : "");
     }
 
-    bool enqueue(T *item,[[maybe_unused]] const int tid)
+    __attribute__((used,always_inline)) bool enqueue(T *item,[[maybe_unused]] const int tid)
     {
         int try_close = 0;
 
         while (true)
         {
-            while(!Base::safeCluster(false));
+            Base::safeCluster();
             
             uint64_t tailTicket = Base::tail.fetch_add(1);
 
@@ -78,7 +98,11 @@ public:
                     return false;
                 }
             }
+#ifndef DISABLE_POWTWO_SIZE
+            Cell &cell = array[tailTicket & mask];
+#else
             Cell &cell = array[tailTicket % Ring_Size];
+#endif
             uint64_t idx = cell.idx.load();
             if (cell.val.load() == nullptr)
             {
@@ -86,11 +110,8 @@ public:
                 {
                     if ((!node_unsafe(idx) || Base::head.load() < tailTicket))
                     {
-                        if ((!node_unsafe(idx) || Base::head.load() < tailTicket))
-                        {
-                            if (CAS2((void **)&cell, nullptr, idx, item, tailTicket))
-                                return true;
-                        }
+                        if (CAS2((void **)&cell, nullptr, idx, item, tailTicket))
+                            return true;
                     }
                 }
             }
@@ -108,7 +129,7 @@ public:
         }
     }
 
-    T *dequeue([[maybe_unused]] const int tid)
+    __attribute__((used,always_inline)) T *dequeue([[maybe_unused]] const int tid)
     {
 #ifdef CAUTIOUS_DEQUEUE
         if (Base::isEmpty())
@@ -116,10 +137,14 @@ public:
 #endif
         while (true)
         {
-            while(!Base::safeCluster(false)); //
+            Base::safeCluster();
 
             uint64_t headTicket = Base::head.fetch_add(1);
+#ifndef DISABLE_POWTWO_SIZE
+            Cell &cell = array[headTicket & mask];
+#else
             Cell &cell = array[headTicket % Ring_Size];
+#endif
 
             int r = 0;
             uint64_t tt = 0;
@@ -169,6 +194,10 @@ public:
                 return nullptr; // coda vuota;
             }
         }
+    }
+
+    inline size_t RingSize() const { 
+        return Ring_Size; 
     }
 
     inline size_t size() const {

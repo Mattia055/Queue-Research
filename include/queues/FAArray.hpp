@@ -97,7 +97,7 @@ public:
         return t > h ? t - h : 0;
     }
 
-    inline void enqueue(T* item, const int tid) {
+    __attribute__((used,always_inline)) void enqueue(T* item, const int tid) {
         if(item == nullptr)
             throw std::invalid_argument("item cannot be null pointer");
 
@@ -129,7 +129,7 @@ public:
         }
     }
 
-    T* dequeue(const int tid) {
+    __attribute__((used,always_inline)) T* dequeue(const int tid) {
         T* item = nullptr;
         Node* lhead = HP.protect(kHpHead, head, tid);
 
@@ -202,8 +202,8 @@ public:
     }
 
     size_t size(int tid) { return f->size(tid); }
-    inline void enqueue(T* item, const int tid) { return f->enqueue(item, tid); }
-    inline T* dequeue(const int tid) { return f->dequeue(tid);}
+    __attribute__((used,always_inline)) void enqueue(T* item, const int tid) { return f->enqueue(item, tid); }
+    __attribute__((used,always_inline)) T* dequeue(const int tid) { return f->dequeue(tid);}
 };
 
 // Type alias for FAAQueue

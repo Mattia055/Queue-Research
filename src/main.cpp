@@ -1,151 +1,87 @@
 #include <iostream>
+#include <sstream>
 #include <vector>
-#include <chrono>
-#include <unistd.h>
 #include <string>
-#include <array>
+#include <stdexcept>
+#include <chrono>
 
-#include "FAArray.hpp"
-#include "LPRQ.hpp"
-#include "LCRQ.hpp"
+#include "LMTQ.hpp"
+#include "Benchmark.hpp"
 #include "SymmetricBenchmark.hpp"
-#include "MuxQueue.hpp"
-#include "ProdConsBenchmark.hpp"
-#include "MemoryBenchmark.hpp"
+#include "PairsBenchmark.hpp"
 #include "QueueTypeSet.hpp"
+#include "Format.hpp"
+#include "numa_support.hpp"
 
-#define relativePath "../result" // from build to project root
+using bench::Benchmark;
 
-using namespace std;
-using namespace chrono;
-using namespace bench;
+// int main() {
+//     LMTQueue<uintptr_t> queue(128, 128);
 
-int main(void)
-{
+//     // Enqueue values
+//     for (uintptr_t i = 1; i < 10000; i++) {
+//         queue.enqueue(reinterpret_cast<uintptr_t*>(i), 0);
+//     }
 
-    std::cout << "LCRQ -> " << LCRQueue<int>::className() << 
-                    "\nLPRQ -> " << LPRQueue<int>::className() << 
-                    "\nFAAArray -> " << FAAQueue<int>::className() << 
-                    "\nLinkedMuxQueue -> " << LinkedMuxQueue<int, false>::className() <<
-                    "\nBoundMuxQueue -> " << BoundedMuxQueue<int>::className() << 
-                    "\nBoundedCRQueue -> " << BoundedCRQueue<int>::className() <<
-                    "BoundedPRQueue -> " << BoundedPRQueue<int>::className() << std::endl;
+//     // Dequeue and compare
+//     for (uintptr_t i = 1; i < 10000; i++) {
+//         uintptr_t* value = queue.dequeue(0);
+//         if (reinterpret_cast<uintptr_t>(value) != i) {
+//             std::cout << "Error at " << i << std::endl;
+//         }
+//     }
 
-    return 0;
+//     std::cout << "Test passed" << std::endl;
+//     return 0;
+// }
 
 
-    // SymmetricBenchmark sym1(2, 0, 4096);
 
-    // // Iterate through each template in the set
-    // UnboundedQueues::foreach([&sym1]<template <typename> typename Queue>() {
-    //     sym1.EnqueueDequeue<Queue>(10, 10, "EnqDeq.csv");
-    // });
 
+template <typename T>
+void print_vector(const std::vector<T>& vec);
+
+int main(int argc, char **argv){
+
+    Format format(argv,argc);
+    Format::FormatKeys keys;
+
+    // Parse
+    // cout << format.path << endl;
+    // cout << keys.threads << "->"; print_vector(format.threads);
+    // cout << keys.producers << "->";print_vector(format.producers);
+    // cout << keys.consumers << "->";print_vector(format.consumers); 
+    // cout << keys.iterations << "->" << (format.iterations) << endl; 
+    // cout << keys.runs << "->" << format.runs << endl;
+    // cout << keys.duration << "->" << format.duration << endl;
+    // cout << keys.granularity << "->" << format.granularity << endl;
+    // cout << keys.warmup << "->"; print_vector(format.warmup);
+    // cout << keys.additionalWork << "->"; print_vector(format.additionalWork);
+    // cout << keys.queueFilter << "->"; print_vector(format.queueFilter);
+    // cout << keys.sizes << "->"; print_vector(format.sizes);
+    // cout << keys.balanced << "->" << format.balanced << endl;
+    // cout << keys.ratio << "->";print_vector(format.ratio);
     // return 0;
 
-    string fileEnqDeq = "../result/EnqDeq.csv";
-    string fileEnqDeqAdditional = "../result/EnqDeqAdditional.csv";
-    string fileProdCons = "../result/ProdCons[1:1].csv";
-    string fileProdConsAdditional = "../result/ProdCons[1:1]Additional.csv";
-    string fileProdCons2 = "../result/ProdCons[1:2].csv";
-    string fileProdCons2Additional = "../result/ProdCons[1:2]Additional.csv";
-    string fileProdCons3 = "../result/ProdCons[2:1].csv";
-    string fileProdCons3Additional = "../result/ProdCons[2:1]Additional.csv";
-    string fileMemory = "../result/MemoryBenchmark.csv";
-    string fileMemory1 = "../result/MemoryBenchmarkAdditional.csv";
-
-    array<size_t, 8> threadSet{1, 2, 4, 8, 16, 32, 64, 128};
-    array<size_t, 7> threadSetUnbalanced{3, 6, 12, 24, 48, 96, 126};
-    size_t length = 4096 * 2;
-    size_t iter = 10'000'000;
-    size_t runs = 50;
-
-    for (size_t thread : threadSet)
-    {
-        SymmetricBenchmark sym1(thread, 2, length);
-        sym1.EnqueueDequeue<BoundedMuxQueue>(iter, runs, fileEnqDeqAdditional);
-        sym1.EnqueueDequeue<LinkedMuxQueue>(iter, runs, fileEnqDeqAdditional);
-        sym1.EnqueueDequeue<FAAQueue>(iter, runs, fileEnqDeqAdditional);
-        sym1.EnqueueDequeue<LPRQueue>(iter, runs, fileEnqDeqAdditional);
-    }
-
-    // Producer Consumer 1:1
-    runs = 10;
-    milliseconds duration = duration_cast<milliseconds>(seconds{10});
-    for (size_t i = 0; i < threadSet.size() - 1; i++)
-    {
-        ProdConsBenchmark pc1(threadSet[i], threadSet[i], 0, false, length);
-        pc1.ProducerConsumer<LCRQueue>(duration, runs, fileProdCons);
-        pc1.ProducerConsumer<FAAQueue>(duration, runs, fileProdCons);
-        pc1.ProducerConsumer<LPRQueue>(duration, runs, fileProdCons);
-    }
-
-    for (size_t i = 0; i < threadSet.size() - 1; i++)
-    {
-        ProdConsBenchmark pc1(threadSet[i], threadSet[i], 2, false, length);
-        pc1.ProducerConsumer<LPRQueue>(duration, runs, fileProdConsAdditional);
-        pc1.ProducerConsumer<BoundedPRQueue>(duration, runs, fileProdConsAdditional);
-        pc1.ProducerConsumer<LPRQueue>(duration, runs, fileProdConsAdditional);
-    }
-
-    // Producer Consumer 1:2
-    for (size_t thread : threadSetUnbalanced)
-    {
-        size_t producer = thread / 3;
-        size_t consumer = thread - producer;
-        ProdConsBenchmark pc1(producer, consumer, 0, false, length);
-        pc1.ProducerConsumer<BoundedMuxQueue>(duration, runs, fileProdCons2);
-        pc1.ProducerConsumer<LCRQueue>(duration, runs, fileProdCons2);
-        pc1.ProducerConsumer<FAAQueue>(duration, runs, fileProdCons2);
-        pc1.ProducerConsumer<LPRQueue>(duration, runs, fileProdCons2);
-    }
-
-    for (size_t thread : threadSetUnbalanced)
-    {
-        size_t producer = thread / 3;
-        size_t consumer = thread - producer;
-        ProdConsBenchmark pc1(producer, consumer, 2, false, length);
-        pc1.ProducerConsumer<BoundedMuxQueue>(duration, runs, fileProdCons2Additional);
-        pc1.ProducerConsumer<LCRQueue>(duration, runs, fileProdCons2Additional);
-        pc1.ProducerConsumer<FAAQueue>(duration, runs, fileProdCons2Additional);
-        pc1.ProducerConsumer<LPRQueue>(duration, runs, fileProdCons2Additional);
-    }
-
-    // Producer Consumer 2:1
-    for (size_t thread : threadSetUnbalanced)
-    {
-        size_t producer = thread * 2 / 3;
-        size_t consumer = thread - producer;
-        ProdConsBenchmark pc1(producer, consumer, 0, false, length);
-        pc1.ProducerConsumer<BoundedMuxQueue>(duration, runs, fileProdCons3);
-        pc1.ProducerConsumer<LCRQueue>(duration, runs, fileProdCons3);
-        pc1.ProducerConsumer<FAAQueue>(duration, runs, fileProdCons3);
-        pc1.ProducerConsumer<LPRQueue>(duration, runs, fileProdCons3);
-    }
-
-    for (size_t thread : threadSetUnbalanced)
-    {
-        size_t producer = thread * 2 / 3;
-        size_t consumer = thread - producer;
-        ProdConsBenchmark pc1(producer, consumer, 2, false, length);
-        pc1.ProducerConsumer<BoundedMuxQueue>(duration, runs, fileProdCons3Additional);
-        pc1.ProducerConsumer<LCRQueue>(duration, runs, fileProdCons3Additional);
-        pc1.ProducerConsumer<FAAQueue>(duration, runs, fileProdCons3Additional);
-        pc1.ProducerConsumer<LPRQueue>(duration, runs, fileProdCons3Additional);
-    }
-
-    // Memory Benchmark
-    MemoryBenchmark::MemoryArguments args;
-    args.synchro = MemoryBenchmark::SYNC_PRODS | MemoryBenchmark::SYNC_CONS;
-    args.producerInitialDelay = 10000ms;
-    args.consumerInitialDelay = 0ms;
-    args.producerSleep = 10000ms;
-    args.consumerSleep = 10000ms;
-    args.consumerUptime = 10000ms;
-    args.producerUptime = 10000ms;
-
-    MemoryBenchmark mem1(5, 5, 0, false, 4096 * 4, args);
-    mem1.MemoryRun<LCRQueue>(seconds{360}, milliseconds{500}, fileMemory);
+    if(format.name == "EnqueueDequeue")
+        SymmetricBenchmark::runSeries(format);
+    else if (format.name == "Pairs")
+        PairsBenchmark::runSeries(format);
+    else
+        puts("Benchmark not found");
 
     return 0;
+
+}
+
+template <typename T>
+void print_vector(const std::vector<T>& vec) {
+    std::cout << "[ ";
+        for (const auto& item : vec) {
+            if constexpr (std::is_same_v<T, std::chrono::milliseconds> || std::is_same_v<T, std::chrono::seconds>) {
+                std::cout << item.count() << " ";
+            } else
+                std::cout << item << " "; 
+        }
+    std::cout << "]" << std::endl;
 }

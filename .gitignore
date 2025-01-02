@@ -1,6 +1,11 @@
 *.zip
 *.md
 /build/
-/.vscode/
+/.vscode
 /result*/
 /*.json
+*.old
+/old
+*.csv
+*.sh
+/googletest
