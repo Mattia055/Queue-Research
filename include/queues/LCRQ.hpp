@@ -1,114 +1,110 @@
 #pragma once
 
 #include <atomic>
+#include <cassert>
+
 #include "LinkedRingQueue.hpp"
 #include "RQCell.hpp"
 #include "x86Atomics.hpp"
+#include "numa_support.hpp"
 
-//POWER_OF_TWO RING_SIZE
+using namespace std;
 
-
+/*
+    Macros:
+    DISABLE_PADDING: disables padding for cells
+    DISABLE_POW2: Disables power of 2 modulo ops
+    CAUTIOUS_DEQUEUE: check that the queue is empty before attempt pop
+*/
 
 
 template <typename T, bool padded_cells, bool bounded>
-class CRQueue : public QueueSegmentBase<T, CRQueue<T, padded_cells, bounded>>
-{
+class CRQueue : public QueueSegmentBase<T, CRQueue<T, padded_cells, bounded>> {
 private:
-
-    const size_t Ring_Size;
-#ifndef DISABLE_POWTWO_SIZE
-    const size_t mask;  //Mask to execute the modulo operation
-#endif
 
     using Base = QueueSegmentBase<T, CRQueue<T, padded_cells, bounded>>;
     using Cell = detail::CRQCell<T *, padded_cells>;
 
+    static constexpr size_t TRY_CLOSE = 10;
+
+    size_t size;
+#ifndef DISABLE_POW2
+    size_t mask;  //Mask to execute the modulo operation
+#endif
     Cell *array;
 
-    inline uint64_t node_index(uint64_t i) const
-    {
-        return (i & ~(1ull << 63));
-    }
+    inline uint64_t nodeIndex(uint64_t i)   const {return (i & ~(1ull << 63));}
+    inline uint64_t nodeUnsafe(uint64_t i)  const {return i & (1ull << 63);}
+    inline uint64_t setUnsafe(uint64_t i)   const {return (i | (1ull << 63));}
 
-    inline uint64_t set_unsafe(uint64_t i) const
-    {
-        return (i | (1ull << 63));
-    }
-
-    inline uint64_t node_unsafe(uint64_t i) const
-    {
-        return i & (1ull << 63);
-    }
-
-public:
-    CRQueue(size_t RingSize=Base::RING_SIZE): 
-    Base(), 
-#ifndef DISABLE_POWTWO_SIZE
-    Ring_Size{detail::nextPowTwo(RingSize)},
-    mask{Ring_Size - 1}
+private:
+    CRQueue(size_t size_par,[[maybe_unused]] const int tid, const uint64_t start): Base(), 
+#ifndef DISABLE_POW2
+    size{detail::nextPowTwo(size_par)},
+    mask{size - 1}
 #else
-    Ring_Size{RingSize}
+    size{size_par}
 #endif
     {
-        if(Ring_Size == 0)
-            throw std::invalid_argument("Ring Size must be greater than 0");
-        array = new Cell[Ring_Size];
-        for (uint64_t i = 0; i < Ring_Size; i++)
-        {
-#ifndef DISABLE_POWTWO_SIZE
-            uint64_t j = i & mask;
-#else 
-            uint64_t j = i % Ring_Size;
-#endif
-            array[j].val.store(nullptr, std::memory_order_relaxed);
-            array[j].idx.store(i, std::memory_order_relaxed);
+        assert(size_par > 0);
+        array = new Cell[size];
+
+        for(uint64_t i = start; i < start + size; ++i){
+            array[i % size].val.store(nullptr,memory_order_relaxed);
+            array[i % size].idx.store(i,memory_order_relaxed);           
         }
 
-        Base::head.store(0, std::memory_order_relaxed);
-        Base::tail.store(0, std::memory_order_relaxed);
-        
-        Base::cluster.store(isNumaAvailable() ? getNumaNode() : 0, std::memory_order_relaxed);
+        Base::head.store(start,memory_order_relaxed);
+        Base::tail.store(start,memory_order_relaxed);
+        //Numa optimization
+        Base::cluster.store((isNumaAvailable() ? getNumaNode() : 0), memory_order_relaxed );
     }
 
-    //Constructor to ensure protability with LinkedRing Variants
-    CRQueue(size_t threads, size_t Ring_Size): CRQueue(Ring_Size) {}
 
-    ~CRQueue() {
-        delete[] array;
+public: 
+    //uses the tid argument to be consistent with linked queues
+    CRQueue(size_t size_par,[[maybe_unused]] const int tid = 0): CRQueue(size_par,tid,0){}
+
+    ~CRQueue() { 
+        while(pop(0) != nullptr);
+        delete[] array; 
     }
 
-    static std::string className(bool padding = true)
-    {
+    static std::string className(bool padding = true){
         using namespace std::string_literals;
-        return (bounded? "Bounded"s : ""s ) + "CRQueue"s + ((padded_cells && padding)? "/padded" : "");
+        return (bounded? "Bounded"s : ""s) + "CRQueue"s + ((padded_cells && padding)? "/padded":"");
     }
 
-    __attribute__((used,always_inline)) bool enqueue(T *item,[[maybe_unused]] const int tid)
+    /*
+        Takes an additional tid parameter to keep the interface compatible with
+        LinkedRingQueue->push
+        The parameter has a default value so that it can be omitted
+    */
+    __attribute__((used,always_inline)) bool push(T *item,[[maybe_unused]] const int tid = 0)
     {
         int try_close = 0;
 
         while (true)
         {
             Base::safeCluster();
-            
             uint64_t tailTicket = Base::tail.fetch_add(1);
 
-            if constexpr (bounded == false){
+            if constexpr (bounded == false){    //if LinkedRingQueue Segment then checks if the segment is closed
                 if(Base::isClosed(tailTicket)){
                     return false;
                 }
             }
-#ifndef DISABLE_POWTWO_SIZE
+#ifndef DISABLE_POW2
             Cell &cell = array[tailTicket & mask];
 #else
-            Cell &cell = array[tailTicket % Ring_Size];
+            Cell &cell = array[tailTicket % size];
 #endif
             uint64_t idx = cell.idx.load();
             if (cell.val.load() == nullptr)
             {
-                if (node_index(idx) <= tailTicket)
+                if (nodeIndex(idx) <= tailTicket)
                 {
-                    if ((!node_unsafe(idx) || Base::head.load() < tailTicket))
+                    if ((!nodeUnsafe(idx) || Base::head.load() < tailTicket))
                     {
                         if (CAS2((void **)&cell, nullptr, idx, item, tailTicket))
                             return true;
@@ -116,34 +112,38 @@ public:
                 }
             }
 
-            if (tailTicket >= Base::head.load() + Ring_Size)
+            if (tailTicket >= Base::head.load() + size)
             {   
-                if constexpr (bounded){
+                if constexpr (bounded){ //if queue is bounded then never closes the segment
                     return false;
                 }
                 else{
-                    if (Base::closeSegment(tailTicket, ++try_close > Base::TRY_CLOSE))
+                    if (Base::closeSegment(tailTicket, ++try_close > TRY_CLOSE)){
                         return false;
+                    }
                 }
             }
         }
     }
 
-    __attribute__((used,always_inline)) T *dequeue([[maybe_unused]] const int tid)
+     /*
+        Takes an additional tid parameter to keep the interface compatible with
+        LinkedRingQueue->pop
+        The parameter has a default value so that it can be omitted
+    */
+    __attribute__((used,always_inline)) T *pop([[maybe_unused]] const int tid = 0)
     {
-#ifdef CAUTIOUS_DEQUEUE
-        if (Base::isEmpty())
-            return nullptr;
+#ifdef CAUTIOUS_DEQUEUE //checks if the queue is empty before trying operations
+        if (Base::isEmpty()) return nullptr;
 #endif
         while (true)
         {
             Base::safeCluster();
-
             uint64_t headTicket = Base::head.fetch_add(1);
-#ifndef DISABLE_POWTWO_SIZE
+#ifndef DISABLE_POW2
             Cell &cell = array[headTicket & mask];
 #else
-            Cell &cell = array[headTicket % Ring_Size];
+            Cell &cell = array[headTicket % size];
 #endif
 
             int r = 0;
@@ -152,23 +152,23 @@ public:
             while (true)
             {
                 uint64_t cell_idx = cell.idx.load();
-                uint64_t unsafe = node_unsafe(cell_idx);
-                uint64_t idx = node_index(cell_idx);
+                uint64_t unsafe = nodeUnsafe(cell_idx);
+                uint64_t idx = nodeIndex(cell_idx);
                 T *val = static_cast<T *>(cell.val.load());
 
                 if (idx > headTicket)
                     break;
 
                 if (val != nullptr)
-                { // Transizione
+                { //
                     if (idx == headTicket)
                     {
-                        if (CAS2((void **)&cell, val, cell_idx, nullptr, unsafe | (headTicket + Ring_Size)))
+                        if (CAS2((void **)&cell, val, cell_idx, nullptr, unsafe | (headTicket + size)))
                             return val;
                     }
                     else
                     { // Unsafe Transition
-                        if (CAS2((void **)&cell, val, cell_idx, val, set_unsafe(idx)))
+                        if (CAS2((void **)&cell, val, cell_idx, val, setUnsafe(idx)))
                             break;
                     }
                 }
@@ -181,7 +181,7 @@ public:
                     uint64_t t = Base::tailIndex(tt);
                     if (unsafe || t < headTicket + 1 || closed || r > 4 * 1024 )
                     {
-                        if (CAS2((void **)&cell, val, cell_idx, val, unsafe | (headTicket + Ring_Size)))
+                        if (CAS2((void **)&cell, val, cell_idx, val, unsafe | (headTicket + size)))
                             break;
                     }
                     ++r;
@@ -196,31 +196,29 @@ public:
         }
     }
 
-    inline size_t RingSize() const { 
-        return Ring_Size; 
-    }
-
-    inline size_t size() const {
+    inline size_t length([[maybe_unused]] const int tid = 0) const {
         if constexpr (bounded){
             uint64_t length = Base::tail.load() - Base::head.load();
-            return length < 0 ? 0 : length > Ring_Size ? Ring_Size : length;
+            return length < 0 ? 0 : length > size ? size : length;
         } else {
-            return Base::size();
+            return Base::length();
         }
     }
 
-    friend class LinkedRingQueue<T,CRQueue<T,padded_cells,bounded>>;   
+    friend class LinkedRingQueue<T,CRQueue<T,padded_cells,bounded>>;   //LinkedRingQueue can access private class members 
 };
 
-
-#ifndef NO_PADDING
+/*
+    Declare aliases for Unbounded and Bounded Queues
+*/
+#ifndef DISABLE_PADDING
 template<typename T,bool padded_cells=true,bool bounded=false>
 #else
 template<typename T,bool padded_cells=true,bool bounded=false>
 #endif
 using LCRQueue = LinkedRingQueue<T,CRQueue<T,padded_cells,bounded>>;
 
-#ifndef NO_PADDING
+#ifndef DISABLE_PADDING
 template<typename T,bool padded_cells=true,bool bounded=true>
 #else
 template<typename T,bool padded_cells=false,bool bounded=true>

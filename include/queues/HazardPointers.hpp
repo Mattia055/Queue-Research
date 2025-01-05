@@ -3,6 +3,7 @@
 #include <atomic>
 #include <iostream>
 #include <vector>
+#include <cassert>
 
 
 using namespace std;
@@ -16,7 +17,7 @@ using namespace std;
 template<typename T>
 class HazardPointers {
 public:
-    static const int MAX_THREADS        = 200; 
+    static const int MAX_THREADS        = 256; 
 private:
     static const int MAX_HP_PER_THREAD  = 11;
     static const int CLPAD     = CACHE_LINE / sizeof(std::atomic<T*>);
@@ -36,7 +37,8 @@ public:
     maxHPs{maxHPs},
     maxThreads{maxThreads}
     {
-
+        assert(maxHPs <= MAX_HP_PER_THREAD);
+        assert(maxThreads <= MAX_THREADS);
         for(int iThread = 0; iThread < maxThreads; iThread++){
             for(int iHP = 0; iHP < maxHPs; iHP++){
                 Hazard[iThread*CLPAD][iHP].store(nullptr,std::memory_order_relaxed);

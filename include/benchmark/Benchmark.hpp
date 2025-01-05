@@ -29,8 +29,8 @@ protected:
     static constexpr uint64_t RINGSIZE = 4096;
 public:
 struct Arguments {
-    bool _stdout            = false;
-    bool _progress          = false;
+    bool _stdout            = true;
+    bool _progress          = true;
     bool _overwrite         = false;
 
     Arguments(bool f_stdout,bool f_progress,bool f_overwrite):
@@ -249,21 +249,21 @@ static string formatTime(int totalSeconds) {
 }
 
 public:
-static bool notFile(const string filename) {
+static bool fileExists(const string filename) {
     // Check if file exists
     std::ifstream file(filename);
-    if (!file) {
+    if (file) {
         return true;  // File doesn't exist or cannot be opened for reading
     }
 
     // Use stat to check the file size (for any file, including empty ones)
     struct stat fileStat;
-    if (stat(filename.c_str(), &fileStat) != 0) {
+    if (stat(filename.c_str(), &fileStat) == 0) {
         return true;  // Error checking file status
     }
 
     // If the file size is 0, it is empty
-    return fileStat.st_size == 0;
+    return fileStat.st_size != 0;
 }
 static inline size_t getTotalMemory(bool includeSwap) {
         using namespace std;

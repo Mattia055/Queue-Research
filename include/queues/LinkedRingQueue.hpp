@@ -16,104 +16,117 @@
 #define CLUSTER_TIMEOUT 100
 #endif
 
-using namespace std;
-
 template<class T, class Segment>
 class LinkedRingQueue{
 private:
-    static constexpr size_t MAX_THREADS     = 128;
-    static constexpr size_t RING_SIZE       = 128; //setta la lunghezza per i segmenti
+    static constexpr size_t MAX_THREADS = HazardPointers<Segment*>::MAX_THREADS;
     static constexpr int kHpTail = 0;
     static constexpr int kHpHead = 1;
-    const int maxThreads;
+    const size_t maxThreads;
+    const size_t size;
 
     alignas(CACHE_LINE) std::atomic<Segment*> head;
     alignas(CACHE_LINE) std::atomic<Segment*> tail;
     
-    HazardPointers<Segment> HP;
+    HazardPointers<Segment> HP; //Hazard Pointer matrix to ensure no memory leaks on concurrent allocations and deletions
 
     //Deprecated function
     inline T* dequeueAfterNextLinked(Segment* lhead, int tid) {
-        return lhead->dequeue(tid);
+        return lhead->pop(tid);
     }
 
 public:
 
-    size_t Ring_Size; //variabile d'istanza
-
-    LinkedRingQueue(int maxThreads=MAX_THREADS, size_t Segment_Length=RING_SIZE):
-    Ring_Size{Segment_Length},
-    maxThreads{maxThreads},
-    HP(2,maxThreads)
+    LinkedRingQueue(size_t SegmentLength, size_t threads = MAX_THREADS):
+    size{SegmentLength},
+    maxThreads{threads},
+    HP(2,maxThreads)    
     {
 #ifndef DISABLE_HAZARD
-    assert(maxThreads <= HazardPointers<Segment*>::MAX_THREADS); //assertion to assure no SIGSEGV
+    assert(maxThreads <= MAX_THREADS); //assertion to assure no SIGSEGV when accessing the HP matrix
 #endif
-        Segment* sentinel = new Segment(Segment_Length);
-        head.store(sentinel,std::memory_order_relaxed);
-        tail.store(sentinel,std::memory_order_relaxed);
-
+        Segment* sentinel = new Segment(SegmentLength);
+        head.store(sentinel, std::memory_order_relaxed);
+        tail.store(sentinel, std::memory_order_relaxed);
     }
 
+    /*
+        When the queue goes out of scope:
+        1. empty the current segment (ensures no memory leaks on elements)
+        2. delete the current segment
+
+        The destructor cascades on the next segments
+    */
     ~LinkedRingQueue() {
-        while(dequeue(0) != nullptr); //Svuota la coda
-        delete head.load(); //elimina il primo Segment;
+        while(pop(0) != nullptr);
+        delete head.load();
     }
 
-    static std::string className(bool padding = true){
+    static string className(bool padding = true){
         return "Linked" + Segment::className(padding);
     }
 
-    __attribute__((used,always_inline)) void enqueue(T* item, int tid){
+    /*
+        pushes a new element into the queue. The operation always succeds
+        (if current segment is full then allocates another one)
+
+        Note: It uses Hazard Pointer to protect access to segments (ensures no memory leaks on concurrent eliminations)
+    */
+    __attribute__((used,always_inline)) void push(T* item, int tid){
         if(item == nullptr)
-            throw std::invalid_argument("item cannot be null pointer");
+            throw invalid_argument(className(false) + "ERROR push(): item cannot be null");
         
         Segment *ltail = HP.protect(kHpTail,tail.load(),tid);
-        while(1) {
-
-#ifndef DISABLE_HAZARD //Se Hazard Pointers abilitati
+        while(true) {
+#ifndef DISABLE_HAZARD
             Segment *ltail2 = tail.load();
             if(ltail2 != ltail){
-                ltail = HP.protect(kHpTail,ltail2,tid); //cambia la coda
+                ltail = HP.protect(kHpTail,ltail2,tid); //if current segment has been updated then changes
                 continue;
             }
 #endif  
             Segment *lnext = ltail->next.load();
-            if(lnext != nullptr) { //se esiste una nuova coda
-                if(tail.compare_exchange_strong(ltail, lnext))
-                    ltail = HP.protect(kHpTail, lnext,tid); //aggiorna il puntatore coda protetto dal thread
-                else
-                    ltail = HP.protect(kHpTail,tail.load(),tid); //qualcun altro thread ha cambiato la coda [aggiorno il puntatore]
-                
-                continue; //provo l'inserimento nella nuova coda
+            if(lnext != nullptr) { //If a new segment exists
+                tail.compare_exchange_strong(ltail, lnext)?
+                    ltail = HP.protect(kHpTail, lnext,tid) //update protection on the new Segment
+                : 
+                    ltail = HP.protect(kHpTail,tail.load(),tid); //someone else already updated the shared queeu
+                continue; //try push on the new segment
             }
 
-            if(ltail->enqueue(item,tid)) {
-                HP.clear(kHpTail,tid); //se l'inserimento ha successo elimino il puntatore dal thread;
+            if(ltail->push(item,tid)) {
+                HP.clear(kHpTail,tid); //if succesful insertion then exits updating the HP matrix
                 break;
             }
 
-            //se l'inserimento non ha successo allora il Segmento è pieno, ne serve un altro
-            Segment* newTail = new Segment(Ring_Size);
-            newTail->setStartIndex(ltail->getNextSegmentStartIndex());
-            newTail->enqueue(item,tid);
+            //if failed insertion then current segment is full (allocate a new one)
+            Segment* newTail = new Segment(size,0,ltail->getTailIndex());
+            newTail->push(item,tid);
 
             Segment* nullSegment = nullptr;
-            if(ltail->next.compare_exchange_strong(nullSegment,newTail)){ //se scambio il segmento modifico anche la nuova coda
+            if(ltail->next.compare_exchange_strong(nullSegment,newTail)){ //if CAS succesful then the queue has ben updated
                 tail.compare_exchange_strong(ltail,newTail);
-                HP.clear(kHpTail,tid); //elimino il puntatore alla vecchia coda dall'Hazard vector;
+                HP.clear(kHpTail,tid); //clear protection on the tail
                 break;
             } 
             else 
-                delete newTail;
+                delete newTail; //delete the segment since the modification has been unsuccesful
 
-            ltail = HP.protect(kHpTail,nullSegment,tid);
-
+            ltail = HP.protect(kHpTail,nullSegment,tid);    //update protection on hte current new segment
         }
     }
 
-    __attribute__((used,always_inline)) T* dequeue(int tid) {
-        Segment* lhead = HP.protect(kHpHead,head.load(),tid);
+    /*
+    Pop operation tries to dequeue from the linked queue, from the current segment. If segment is empty
+    then tries to load the next segment. Fails if pop unsuccesful and no next segment.
+
+    NOTE:   uses protect / clear (Hazard Pointers operation) to ensure no other thread deallocates the
+            segment while another thread is using it (prevents memory leaks and Segmentation Faults)
+
+    return: pointer to next element or nullptr
+     */
+    __attribute__((used,always_inline)) T* pop(int tid) {
+        Segment* lhead = HP.protect(kHpHead,head.load(),tid);   //protect the current segment
         while(true){
 #ifndef DISABLE_HAZARD
             Segment *lhead2 = head.load();
@@ -122,15 +135,15 @@ public:
                 continue;
             }           
 #endif
-            T* item = lhead->dequeue(tid); //dequeue dal segmento corrente
+            T* item = lhead->pop(tid); //pop on the current segment
             if (item == nullptr) {
-                Segment* lnext = lhead->next.load(); //carica il next
-                if (lnext != nullptr) { //se next == nullptr allora non c'è nulla da estrarre
-                    item = lhead->dequeue(tid); //DequeueAfterNextLinked(lnext)
+                Segment* lnext = lhead->next.load(); //if unsuccesful pop then try to load next semgnet
+                if (lnext != nullptr) { //if next segments exist
+                    item = lhead->pop(tid); //DequeueAfterNextLinked(lnext)
                     if (item == nullptr) {
-                        if (head.compare_exchange_strong(lhead, lnext)) {
-                            HP.retire(lhead, tid); //elimino il vecchio puntatore a testa
-                            lhead = HP.protect(kHpHead, lnext, tid); //proteggo il nuovo puntatore a testa
+                        if (head.compare_exchange_strong(lhead, lnext)) {   //changes shared head pointer
+                            HP.retire(lhead, tid); //tries to deallocate current segment
+                            lhead = HP.protect(kHpHead, lnext, tid); //protect new segment
                         } else {
                             lhead = HP.protect(kHpHead, lhead, tid);
                         }
@@ -139,12 +152,15 @@ public:
                 }
             }
 
-            HP.clear(kHpHead,tid); //dopo l'estrazione elimino dalla tabella del thread il puntatore alla testa corrente
+            HP.clear(kHpHead,tid); //after pop removes protection on the current segment
             return item;
         }
     }
 
-    size_t size(int tid) {
+    /*
+        Returns current size of the queue
+    */
+    size_t length(int tid) {
         Segment *lhead = HP.protect(kHpHead,head,tid);
         Segment *ltail = HP.protect(kHpTail,tail,tid);
         uint64_t t = ltail->getTailIndex();
@@ -155,31 +171,42 @@ public:
 
 };
 
+/**
+ * Superclass for queue segments
+ */
 template <class T,class Segment>
 struct QueueSegmentBase {
 protected:
-
-    static constexpr size_t     RING_SIZE = 128;
-    static constexpr size_t     TRY_CLOSE = 10;
 
     alignas(CACHE_LINE) std::atomic<uint64_t> head{0};
     alignas(CACHE_LINE) std::atomic<uint64_t> tail{0};
     alignas(CACHE_LINE) std::atomic<Segment*> next{nullptr};
     alignas(CACHE_LINE) std::atomic<uint64_t> cluster{};   //most operations should be on the same cluster
 
-    static inline uint64_t tailIndex(uint64_t t) {
-        return (t & ~(1ull << 63));
-    }
+    /*
+        The tail is:
+        MSB: closed bit
+        63 LSB: tail index
+    */
 
-    static inline bool isClosed(uint64_t t) {
-        return (t & (1ull<<63)) != 0;
-    }
+    //Returns the index given the tail
+    static inline uint64_t tailIndex(uint64_t tail) {return (tail & ~(1ull << 63));}
 
+    //returns the current state of the queue
+    static inline bool isClosed(uint64_t tail) {return (tail & (1ull<<63)) != 0;}
+
+    /*
+    Sets the start index when allocating new segments (uses the index of the last segment - or 0)
+    If the startIndex isn't set correctly then the queue length becomes irrelevant
+    */
     inline void setStartIndex(uint64_t i){
         head.store(i,std::memory_order_relaxed);
         tail.store(i,std::memory_order_relaxed); 
     }
 
+    /*
+    push and pop operation can make the indexes inconsistent (head greater than tail)
+    */
     void fixState() {
         while(true) {
             uint64_t t = tail.load();
@@ -195,17 +222,22 @@ protected:
         }
     }
 
-    size_t size() const {
+    //returns the current size of the queue considering all segments
+    size_t length() const {
         long size = tail.load() - head.load();
         return size > 0 ? size : 0;
     }
 
+    /*
+    Uses CAS to try to close the queue, if "force" uses asm TAS on the MSB of the tail
+    */
     inline bool closeSegment(const uint64_t tailTicket, bool force) {
         if(!force) {
-            uint64_t tmp = tailTicket + 1;
+            uint64_t tmp = tailTicket +1;
             return tail.compare_exchange_strong(tmp,(tailTicket + 1) | (1ull << 63));
-        } else 
-            return BIT_TEST_AND_SET63(&tail);
+        } else {
+            return BIT_TEST_AND_SET63(&(tail));
+        }
     }
 
     inline bool isEmpty() const {
@@ -220,22 +252,23 @@ protected:
         return tailIndex(tail.load());
     }
 
-    inline uint64_t getNextSegmentStartIndex() const {
-        return getTailIndex() - 1; 
+    inline uint64_t getNextSegmentStartIndex() const { 
+        return getTailIndex() - 1;
     }
 
+    /*
+    DEBUG: numa optimization to keep most operations in-cluster
+    */
 #ifndef DISABLE_NUMA
     __attribute__((used,always_inline)) bool safeCluster(){
-        do{
+        while(true){
             uint64_t c = cluster.load();
             if(c != getNumaNode()){
                 this_thread::sleep_for(std::chrono::microseconds(CLUSTER_TIMEOUT));
-                if(!cluster.compare_exchange_strong(c,getNumaNode()))
-                    continue;
-            } 
-            return true;
-
-        }while(true);
+                if(cluster.compare_exchange_strong(c,getNumaNode()))
+                    return true;
+            }
+        }
     }
 #else
     inline bool safeCluster(){return true;}

@@ -4,69 +4,66 @@
 #include "LinkedRingQueue.hpp"
 #include "RQCell.hpp"
 
+/*
+    Macros:
+    DISABLE_PADDING: disables padding for cells
+    DISABLE_POW2: Disables power of 2 modulo ops
+    CAUTIOUS_DEQUEUE: check that the queue is empty before attempt pop
+*/
+
 template<typename T,bool padded_cells, bool bounded>
 class PRQueue : public QueueSegmentBase<T, PRQueue<T,padded_cells,bounded>> {
 private:
     using Base = QueueSegmentBase<T,PRQueue<T,padded_cells,bounded>>;
     using Cell = detail::CRQCell<void*,padded_cells>;
+
+    static constexpr size_t TRY_CLOSE = 10;
     
     Cell* array; 
-    const size_t Ring_Size;
-#ifndef DISABLE_POWTWO_SIZE
+    const size_t size;
+#ifndef DISABLE_POW2
     const size_t mask;  //Mask to execute the modulo operation
 #endif
 
-    inline uint64_t nodeIndex(uint64_t i) const {
-        return (i & ~(1ull << 63));
-    }
-
-    inline uint64_t setUnsafe(uint64_t i) const {
-        return (i | (1ull << 63));
-    }
-
-    inline uint64_t nodeUnsafe(uint64_t i) const {
-        return (i & (1ull << 63));
-    }
-
-    inline bool isBottom(void* const value) const {
-        return (reinterpret_cast<uintptr_t>(value) & 1) != 0;
-    }
-
+    /* Private class methods */
+    inline uint64_t nodeIndex(uint64_t i) const {return (i & ~(1ull << 63));}
+    inline uint64_t setUnsafe(uint64_t i) const {return (i | (1ull << 63));}
+    inline uint64_t nodeUnsafe(uint64_t i) const {return (i & (1ull << 63));}
+    inline bool isBottom(void* const value) const {return (reinterpret_cast<uintptr_t>(value) & 1) != 0;}
     inline void* threadLocalBottom(const int tid) const {
         return reinterpret_cast<void*>(static_cast<uintptr_t>((tid << 1) | 1));
     }
 
-public:
-    PRQueue(size_t RingSize=Base::RING_SIZE):
-    Base(),
-#ifndef DISABLE_POWTWO_SIZE
-    Ring_Size{detail::nextPowTwo(RingSize)},
-    mask{Ring_Size - 1}
+private:
+    //uses the tid argument to be consistent with linked queues
+    PRQueue(size_t size_par, [[maybe_unused]] const int tid, const uint64_t start): Base(),
+#ifndef DISABLE_POW2
+    size{detail::nextPowTwo(size_par)},
+    mask{size - 1}
 #else
-    Ring_Size{RingSize}
+    size{size_par}
 #endif
     {
-        array = new Cell[Ring_Size];
-        for(uint64_t i = 0; i < Ring_Size; i++) { 
-#ifndef DISABLE_POWTWO_SIZE
-            uint64_t j = i & mask;
-#else
-            uint64_t j = i % Ring_Size;
-#endif
-            array[j].val.store(nullptr,std::memory_order_relaxed);
-            array[j].idx.store(i,std::memory_order_relaxed);
+        assert(size_par > 0);
+        array = new Cell[size];
+
+        for(uint64_t i = start; i < start + size; ++i){
+            array[i % size].val.store(nullptr,memory_order_relaxed);
+            array[i % size].idx.store(i,memory_order_relaxed);           
         }
 
-        Base::head.store(0,std::memory_order_relaxed);
-        Base::tail.store(0,std::memory_order_relaxed);
-
-        Base::cluster.store(isNumaAvailable() ? getNumaNode() : 0, std::memory_order_relaxed);
+        Base::head.store(start,memory_order_relaxed);
+        Base::tail.store(start,memory_order_relaxed);
+        //Numa optimization
+        Base::cluster.store((isNumaAvailable() ? getNumaNode() : 0), memory_order_relaxed );
     }
 
-    //Constructor to ensure protability with LinkedRing Variants
-    PRQueue(size_t threads,size_t Ring_Size): PRQueue(Ring_Size){}
+public:
+    //uses the tid argument to be consistent with linked queues
+    PRQueue(size_t size_par, [[maybe_unused]] const int tid = 0): PRQueue(size_par,tid,0){}
 
     ~PRQueue(){
+        while(pop(0) != nullptr);
         delete[] array;
     }
 
@@ -75,7 +72,12 @@ public:
         return (bounded? "Bounded"s : ""s ) + "PRQueue"s + ((padded_cells && padding)? "/padded":"");
     }
 
-    __attribute__((used,always_inline)) bool enqueue(T* item,[[maybe_unused]] const int tid) {
+    /*
+        Takes an additional tid parameter to keep the interface compatible with
+        LinkedRingQueue->push
+        The parameter has a default value so that it can be omitted
+    */
+    __attribute__((used,always_inline)) bool push(T* item,[[maybe_unused]] const int tid = 0) {
         int try_close = 0;
     
         while(true) {
@@ -89,10 +91,10 @@ public:
                     return false;
                 }
             }
-#ifndef DISABLE_POWTWO_SIZE
+#ifndef DISABLE_POW2
             Cell& cell = array[tailTicket & mask];
 #else
-            Cell& cell = array[tailTicket % Ring_Size];
+            Cell& cell = array[tailTicket % size];
 #endif
             uint64_t idx = cell.idx.load();
             void* val = cell.val.load();
@@ -103,7 +105,7 @@ public:
             {
                 void* bottom = threadLocalBottom(tid);
                 if(cell.val.compare_exchange_strong(val,bottom)) {
-                    if(cell.idx.compare_exchange_strong(idx,tailTicket + Ring_Size)) {
+                    if(cell.idx.compare_exchange_strong(idx,tailTicket + size)) {
                         if(cell.val.compare_exchange_strong(bottom, item)) {
                             return true;
                         }
@@ -113,12 +115,12 @@ public:
                 }
             }
 
-            if(tailTicket >= Base::head.load() + Ring_Size){
+            if(tailTicket >= Base::head.load() + size){
                 if constexpr (bounded){
                     return false;
                 }
                 else{
-                    if (Base::closeSegment(tailTicket, ++try_close > Base::TRY_CLOSE))
+                    if (Base::closeSegment(tailTicket, ++try_close > TRY_CLOSE))
                         return false;
                 }
             }  
@@ -126,7 +128,12 @@ public:
         }
     }
 
-    __attribute__((used,always_inline)) T* dequeue([[maybe_unused]] const int tid) {
+    /*
+        Takes an additional tid parameter to keep the interface compatible with
+        LinkedRingQueue->push
+        The parameter has a default value so that it can be omitted
+    */
+    __attribute__((used,always_inline)) T* pop([[maybe_unused]] const int tid = 0) {
 #ifdef CAUTIOUS_DEQUEUE
         if(Base::isEmpty())
             return nullptr;
@@ -136,10 +143,10 @@ public:
             Base::safeCluster();
 
             uint64_t headTicket = Base::head.fetch_add(1);
-#ifndef DISABLE_POWTWO_SIZE
+#ifndef DISABLE_POW2
             Cell& cell = array[headTicket & mask];
 #else
-            Cell& cell = array[headTicket % Ring_Size];
+            Cell& cell = array[headTicket % size];
 #endif
 
             int r = 0;
@@ -153,7 +160,7 @@ public:
                 void* val           = cell.val.load();
 
                 if(val != nullptr && !isBottom(val)){
-                    if(idx == headTicket + Ring_Size){
+                    if(idx == headTicket + size){
                         cell.val.store(nullptr);
                         return static_cast<T*>(val);
                     } else {
@@ -169,12 +176,12 @@ public:
                     if((r & ((1ull << 8 ) -1 )) == 0)
                         tt = Base::tail.load();
 
-                    int closed = Base::isClosed(tt);    //in case bounded it's always false
+                    int closed = Base::isClosed(tt);    //in case "bounded" it's always false
                     uint64_t t = Base::tailIndex(tt);
                     if(unsafe || t < headTicket + 1  || r > 4 * 1024 || closed) {
                         if(isBottom(val) && !cell.val.compare_exchange_strong(val,nullptr))
                             continue;
-                        if(cell.idx.compare_exchange_strong(cell_idx, unsafe | (headTicket + Ring_Size)))
+                        if(cell.idx.compare_exchange_strong(cell_idx, unsafe | (headTicket + size)))
                             break;
                     }
                     ++r;
@@ -188,16 +195,12 @@ public:
         }
     }
 
-    inline size_t RingSize() const { 
-        return Ring_Size; 
-    }
-
-    inline size_t size() const {
+    inline size_t length([[maybe_unused]] const int tid = 0) const {
         if constexpr (bounded){
             uint64_t length = Base::tail.load() - Base::head.load();
-            return length < 0 ? 0 : length > Ring_Size ? Ring_Size : length;
+            return length < 0 ? 0 : length > size ? size : length;
         } else {
-            return Base::size();
+            return Base::length();
         }
     }
 
@@ -206,6 +209,9 @@ public:
   
 };
 
+/*
+    Declare aliases for Unbounded and Bounded Queues
+*/
 #ifndef NO_PADDING
 template<typename T,bool padded_cells=true,bool bounded=false>
 #else

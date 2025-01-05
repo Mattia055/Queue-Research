@@ -1,11 +1,10 @@
-#ifndef __H_FAA_QUEUE__
-#define __H_FAA_QUEUE__
+#pragma once
 #include <atomic>
 #include <cmath>
 #include <cstring>
+#include <cstddef>  //for alignas
 #include "RQCell.hpp"
 #include "HazardPointers.hpp"
-#include <cstddef>  // For alignas
 
 #ifndef CACHE_LINE
 #define CACHE_LINE 64
@@ -14,17 +13,15 @@
 template<typename T, bool padded_cells>
 class FAAArrayQueue {
 private:
+
     struct Node;
     using Cell = detail::PlainCell<T*,padded_cells>;
-
-    static constexpr size_t BUFFER_SIZE = 128;
-    static constexpr size_t MAX_THREADS = 128;
     const size_t maxThreads;
 
     HazardPointers<Node> HP;
     const int kHpTail = 0;
     const int kHpHead = 1;
-    const size_t Ring_Size;
+    const size_t size;
 
     alignas(CACHE_LINE) std::atomic<Node*> head;
     alignas(CACHE_LINE) std::atomic<Node*> tail;
@@ -66,10 +63,11 @@ private:
     }
 
 public:
-    FAAArrayQueue(size_t maxThreads=MAX_THREADS, size_t Buffer_Size=BUFFER_SIZE):
-    maxThreads{maxThreads},Ring_Size{Buffer_Size},
+    FAAArrayQueue(size_t Buffer_Size, size_t maxThreads):
+    maxThreads{maxThreads},size{Buffer_Size},
     HP(2,maxThreads)
     {
+        assert(Buffer_Size > 0);
         Node* sentinelNode = new Node(nullptr,0,Buffer_Size);
         sentinelNode->enqidx.store(0,std::memory_order_relaxed);
         head.store(sentinelNode, std::memory_order_relaxed);
@@ -77,7 +75,7 @@ public:
     }
 
     ~FAAArrayQueue() {
-        while(dequeue(0) != nullptr);
+        while(pop(0) != nullptr);
         delete head.load(); //elimina l'ultimo nodo
         delete (int*)taken;
     }
@@ -87,28 +85,28 @@ public:
         return "FAAArrayQueue"s + ((padded_cells && padding)? "/padded" : "");
     }
 
-    size_t size(int tid) {
+    size_t length(int tid) {
         Node* lhead = HP.protect(kHpHead,head,tid);
         Node* ltail = HP.protect(kHpTail,tail,tid);
 
-        uint64_t t = std::min((uint64_t) Ring_Size, ((uint64_t) ltail->enqidx.load())) + ltail->startIndexOffset;
-        uint64_t h = std::min((uint64_t) Ring_Size, ((uint64_t) lhead->deqidx.load())) + lhead->startIndexOffset;
+        uint64_t t = std::min((uint64_t) size, ((uint64_t) ltail->enqidx.load())) + ltail->startIndexOffset;
+        uint64_t h = std::min((uint64_t) size, ((uint64_t) lhead->deqidx.load())) + lhead->startIndexOffset;
         HP.clear(tid);
         return t > h ? t - h : 0;
     }
 
-    __attribute__((used,always_inline)) void enqueue(T* item, const int tid) {
+    __attribute__((used,always_inline)) void push(T* item, const int tid) {
         if(item == nullptr)
             throw std::invalid_argument("item cannot be null pointer");
 
         while(1){
             Node *ltail = HP.protect(kHpTail,tail,tid);
             const int idx = ltail->enqidx.fetch_add(1);
-            if(idx >(Ring_Size-1)) { 
+            if(idx >(size-1)) { 
                 if(ltail != tail.load()) continue;
                 Node* lnext = ltail->next.load(); 
                 if(lnext == nullptr) {
-                    Node* newNode = new Node(item,ltail->startIndexOffset + Ring_Size, Ring_Size);
+                    Node* newNode = new Node(item,ltail->startIndexOffset + size, size);
                     if(ltail->casNext(nullptr,newNode)) {
                         casTail(ltail, newNode);
                         HP.clear(kHpTail,tid);
@@ -129,7 +127,7 @@ public:
         }
     }
 
-    __attribute__((used,always_inline)) T* dequeue(const int tid) {
+    __attribute__((used,always_inline)) T* pop(const int tid) {
         T* item = nullptr;
         Node* lhead = HP.protect(kHpHead, head, tid);
 
@@ -140,7 +138,7 @@ public:
 
         while (true) {
             const int idx = lhead->deqidx.fetch_add(1);
-            if (idx > Ring_Size-1) { // This node has been drained, check if there is another one
+            if (idx > size-1) { // This node has been drained, check if there is another one
                 Node* lnext = lhead->next.load();
                 if (lnext == nullptr) {
                     break;  // No more nodes in the queue
@@ -176,41 +174,10 @@ public:
 
 };
 
-// LinkedAdapter with private constructor
-template<typename T, typename QueueType>
-class LinkedAdapter {
-public:
-    QueueType* f;
-    size_t Ring_Size;
-
-    // Private constructor for LinkedAdapter
-    LinkedAdapter(size_t maxThreads, size_t Buffer_Size):Ring_Size{Buffer_Size} {
-        f = new QueueType(maxThreads, Buffer_Size);
-    }
-
-    ~LinkedAdapter() {
-        delete f;
-    }
-
-    static std::string className(bool padding=true) {
-        using namespace std::string_literals;
-        // Using template specialization to check padded_cells at compile time
-        if constexpr (std::is_same_v<QueueType, FAAArrayQueue<T,true>> == false)
-            padding = false;
-        
-        return "FAAQueue"s + (padding ? "/padded" : "");
-    }
-
-    size_t size(int tid) { return f->size(tid); }
-    __attribute__((used,always_inline)) void enqueue(T* item, const int tid) { return f->enqueue(item, tid); }
-    __attribute__((used,always_inline)) T* dequeue(const int tid) { return f->dequeue(tid);}
-};
-
 // Type alias for FAAQueue
 #ifndef NO_PADDING
 template<typename T, bool padding=true>
 #else
 template<typename T, bool padding=false>
 #endif
-using FAAQueue = LinkedAdapter<T,FAAArrayQueue<T,padding>>;
-#endif // !__H_FAA_QUEUE__
+using FAAQueue = FAAArrayQueue<T,padding>;

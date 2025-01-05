@@ -72,10 +72,13 @@ target_include_directories(testCases_pow2 PRIVATE ${INCLUDE_DIRS} ${GTEST_DIR})
 # if(NUMA_LIBRARY AND NUMA_INCLUDE_DIR) # to ensure that test can run with/without NUMA
 #   target_link_libraries(testCases gtest gtest_main pthread numa)
 # else()
-target_compile_definitions(testCases PUBLIC DISABLE_NUMA DISABLE_POWTWO_SIZE)
+target_compile_definitions(testCases PUBLIC DISABLE_NUMA DISABLE_POW2)
 target_compile_definitions(testCases_pow2 PUBLIC DISABLE_NUMA)
-target_link_libraries(testCases gtest gtest_main  pthread)
-target_link_libraries(testCases_pow2 gtest gtest_main  pthread)
+target_compile_options(testCases PUBLIC -fsanitize=address -g)
+target_compile_options(testCases_pow2 PUBLIC -fsanitize=address -g)
+
+target_link_libraries(testCases gtest gtest_main pthread -fsanitize=address)
+target_link_libraries(testCases_pow2 gtest gtest_main pthread -fsanitize=address)
 # endif()
 
 enable_testing()
@@ -112,4 +115,4 @@ add_test(NAME test_pow2 COMMAND testCases_pow2)
 # enable_testing()
 
 # # Add a CMake test for running the tests
-# add_test(NAME testCases COMMAND testCases)
+# add_test(NAME testCases COMMAND testCases testCases_pow2)

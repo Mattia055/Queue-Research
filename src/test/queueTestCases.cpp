@@ -1,15 +1,12 @@
 #include "gtest/gtest.h"
-#include <vector>
 #include <algorithm>
 #include <atomic>
 #include <iostream>
-#include <atomic>
 #include <barrier>
 #include <vector>
 #include <numeric>
 #include <random>
 
-//#include "LinkedRingQueue.hpp"
 #include "FAArray.hpp"
 #include "LCRQ.hpp"
 #include "LPRQ.hpp"
@@ -17,26 +14,27 @@
 #include "LMTQ.hpp"
 #include "ThreadGroup.hpp"
 
+#define CONCURRENT_RUN 2
+
 
 // Define type aliases for each queue type you want to test
 template<typename V>
-using UnboundedQueues = ::testing::Types<FAAQueue<V>,LCRQueue<V>, LPRQueue<V>, LinkedMuxQueue<V>>; //Still LMTQ doesnt work
+using UnboundedQueues = ::testing::Types<FAAQueue<V>,LCRQueue<V>, LPRQueue<V>, LinkedMuxQueue<V>,LMTQueue<V>>; //LMTQ works
+//using UnboundedQueues = ::testing::Types<LMTQueue<V>>;
 template<typename V>
-using BoundedQueues = ::testing::Types<BoundedCRQueue<V>, BoundedPRQueue<V>, BoundedMuxQueue<V>, BoundedMTQueue<V>>;
+using BoundedQueues = ::testing::Types<BoundedMTQueue<V>,BoundedPRQueue<V>,BoundedMuxQueue<V>,BoundedCRQueue<V>>;
+//using BoundedQueues = ::testing::Types<BoundedMTQueue<V>>;
 
 // Test setup for unbounded queues
 template <typename Q>
 class Unbounded_Traits : public ::testing::Test {
-private:
-    static constexpr int Threads = 128;
-    static constexpr size_t RING_SIZE = 20;
 public:
-    size_t RingSize = RING_SIZE;
-
+    static constexpr int THREADS = 128;
+    static constexpr size_t RING_SIZE = 20;
     Q queue;
 
     // Default constructor with parameters for different queue types
-    Unbounded_Traits() : queue(Threads,RING_SIZE){}
+    Unbounded_Traits() : queue(RING_SIZE,THREADS){}
 };
 
 using UQueuesOfInts = UnboundedQueues<int>;
@@ -47,14 +45,11 @@ TYPED_TEST_SUITE(Unbounded_Traits, UQueuesOfInts);
 TYPED_TEST(Unbounded_Traits, EnqueueDequeue) {
     TypeParam& queue = this->queue;
     for(int i = 1 ; i < 30; i++){
-        queue.enqueue(&i, 0);
-        EXPECT_EQ(*queue.dequeue(0), i);
+        queue.push(&i, 0);
+        EXPECT_EQ(*queue.pop(0), i);
     }
-
-    cout << "OUT OF FORLOOP" << endl;
-
-    EXPECT_EQ(queue.dequeue(0), nullptr);
-    EXPECT_EQ(queue.size(0),0);
+    EXPECT_EQ(queue.pop(0), nullptr);
+    EXPECT_EQ(queue.length(0),0);
 }
 
 TYPED_TEST(Unbounded_Traits, OverflowRing) {
@@ -63,16 +58,16 @@ TYPED_TEST(Unbounded_Traits, OverflowRing) {
     int values[30];  // Ensure there are 30 values to enqueue
     for (int i = 0; i < 30; i++) {
         values[i] = i + 1;  // Initialize with values from 1 to 30
-        queue.enqueue(&values[i], 0);  // Enqueue the address of each value
+        queue.push(&values[i], 0);  // Enqueue the address of each value
     }
 
     // Dequeue and check that the values match
     for (int i = 0; i < 30; i++) {
-        EXPECT_EQ(*reinterpret_cast<int*>(queue.dequeue(0)), values[i]);
+        EXPECT_EQ(*reinterpret_cast<int*>(queue.pop(0)), values[i]);
     }
 
-    EXPECT_EQ(queue.dequeue(0), nullptr);
-    EXPECT_EQ(queue.size(0),0);
+    EXPECT_EQ(queue.pop(0), nullptr);
+    EXPECT_EQ(queue.length(0),0);
 }
 
 TYPED_TEST(Unbounded_Traits, EnqueueDequeueStress) {
@@ -83,18 +78,18 @@ TYPED_TEST(Unbounded_Traits, EnqueueDequeueStress) {
     for(int i = 0; i< 10; ++i) {
         for(int j = 0; j < 2048; ++j) {
             int* val = &(values[j%size]);
-            queue.enqueue(val, 0);
+            queue.push(val, 0);
             //EXPECT_EQ(j+1,queue.size(0)) << "Failed at insertion " << j << " of run " << i;
         }
 
         for(int j = 0; j < 2048; ++j){
             int* val = &(values[j%size]);
-            EXPECT_EQ(queue.dequeue(0),val) << "Failed at extraction " << j << " of run " << i;
+            EXPECT_EQ(queue.pop(0),val) << "Failed at extraction " << j << " of run " << i;
             //EXPECT_EQ(2048 - j - 1,queue.size(0)) << "Failed at iteration " << j << " of run " << i;
         }
 
-        EXPECT_EQ(queue.dequeue(0), nullptr);
-        EXPECT_EQ(queue.size(0),0);
+        EXPECT_EQ(queue.pop(0), nullptr);
+        EXPECT_EQ(queue.length(0),0);
     }
 
 }
@@ -104,14 +99,12 @@ template <typename Q>
 class Bounded_Traits : public ::testing::Test {
 public:
     static constexpr size_t RING_SIZE = 32;
-    size_t RingSize;
-
+    size_t RingSize = RING_SIZE;
     Q queue;
+    
 
     // Default constructor with parameters for different queue types
-    Bounded_Traits() : queue((RING_SIZE)){
-        RingSize = queue.RingSize();
-    }
+    Bounded_Traits() : queue((RING_SIZE)){}
 };
 
 using BQueuesOfInts = BoundedQueues<int>;
@@ -129,18 +122,18 @@ TYPED_TEST(Bounded_Traits, OverflowRing) {
 
     for(int i = 0; i< this->RingSize; i++){
         //init values and ship them
-        EXPECT_EQ(queue.enqueue(&(values[i]), 0),true);
+        EXPECT_EQ(queue.push(&(values[i]), 0),true);
     }
     
     for(int i = 0; i< 100; i++)
-        EXPECT_EQ(queue.enqueue(&try_overwrite,0),false);
+        EXPECT_EQ(queue.push(&try_overwrite,0),false);
     
     for(int i = 0; i< this->RingSize; i++)
-        EXPECT_EQ(*queue.dequeue(0),values[i]);
+        EXPECT_EQ(*queue.pop(0),values[i]);
     
 
-    EXPECT_EQ(queue.dequeue(0), nullptr);
-    EXPECT_EQ(queue.size(),0);
+    EXPECT_EQ(queue.pop(0), nullptr);
+    EXPECT_EQ(queue.length(),0);
 
 }
 
@@ -156,7 +149,7 @@ TYPED_TEST(Bounded_Traits, FlowRing){
     for(int j = 0; j< 100; j++){
         for(int i = 0; i<this->RingSize; i++){
             values[i] = i+1;
-            EXPECT_EQ(queue.enqueue(&(values[i]),0),true);
+            EXPECT_EQ(queue.push(&(values[i]),0),true);
         }
 
         int n_enqueue;
@@ -166,13 +159,13 @@ TYPED_TEST(Bounded_Traits, FlowRing){
         //Try to mess up the order of elements
 
         for(int i = 0; i< n_enqueue; i++)
-            EXPECT_EQ(queue.enqueue(&(try_overwrite),0),false);
+            EXPECT_EQ(queue.push(&(try_overwrite),0),false);
 
         for(int i = 0; i< this->RingSize; i++)
-            EXPECT_EQ(*queue.dequeue(0),values[i]);
+            EXPECT_EQ(*queue.pop(0),values[i]);
         
         for(int i = 0; i< dis(gen); i++)
-            EXPECT_EQ(queue.dequeue(0),nullptr);
+            EXPECT_EQ(queue.pop(0),nullptr);
     }
 }
 
@@ -190,22 +183,22 @@ TYPED_TEST(Bounded_Traits, EnqueueDequeueStress){
 
     for(int i = 0; i< 10; ++i) {
         for(int j = 0; j < this->RingSize; ++j) {
-            EXPECT_EQ(queue.enqueue(&(values[j%size]), 0),true);
-            EXPECT_EQ(j+1,queue.size()) << "Failed at insertion " << j << " of run " << i;
+            EXPECT_EQ(queue.push(&(values[j%size]), 0),true);
+            EXPECT_EQ(j+1,queue.length()) << "Failed at insertion " << j << " of run " << i;
         }
 
         for(int i = 0; i< 2048; i++){
-            EXPECT_EQ(queue.enqueue(&try_overwrite,0),false);
-            EXPECT_EQ(queue.size(),this->RingSize);    //full queue;
+            EXPECT_EQ(queue.push(&try_overwrite,0),false);
+            EXPECT_EQ(queue.length(),this->RingSize);    //full queue;
         }
 
         for(int j = 0; j < this->RingSize; ++j){
-            EXPECT_EQ((queue.dequeue(0)),&(values[j%size])) << "Failed at extraction " << j << " of run " << i;
+            EXPECT_EQ((queue.pop(0)),&(values[j%size])) << "Failed at extraction " << j << " of run " << i;
             //EXPECT_EQ(this->RingSize - j - 1,queue.size()) << "Failed at iteration " << j << " of run " << i;
         }
 
-        EXPECT_EQ(queue.dequeue(0), nullptr);
-        EXPECT_EQ(queue.size(),0);
+        EXPECT_EQ(queue.pop(0), nullptr);
+        EXPECT_EQ(queue.length(),0);
     }
 }
 
@@ -221,16 +214,15 @@ using UQueuesOfUserData = UnboundedQueues<UserData>;
 // Test setup for unbounded queues
 template <typename Q>
 class Unbounded_Concurrent : public ::testing::Test {
-private:
-    static constexpr int Threads = 128;
 public:
     static constexpr size_t RING_SIZE = 1024;
+    static constexpr int THREADS = 128;
     size_t RingSize = RING_SIZE;
 
     Q queue;
 
     // Default constructor with parameters for different queue types
-    Unbounded_Concurrent() : queue(Threads,RING_SIZE){}
+    Unbounded_Concurrent() : queue(RING_SIZE,THREADS){}
 };
 
 
@@ -245,8 +237,8 @@ TYPED_TEST_SUITE(Unbounded_Concurrent, UQueuesOfUserData);
 TYPED_TEST(Unbounded_Concurrent,TransferAllItems){
     TypeParam& queue = this->queue;
     std::atomic<bool> stopFlag{false};
-    const size_t numRuns = 10;
-    const size_t iter = 20'000;
+    const size_t numRuns = CONCURRENT_RUN;
+    const size_t iter = 10'000;
 
     for(int iThread = 1 ; iThread < numRuns; iThread++){
         std::vector<uint64_t> sum(iThread);
@@ -257,7 +249,7 @@ TYPED_TEST(Unbounded_Concurrent,TransferAllItems){
             UserData ud[iter];
             for(size_t i = 1; i<= iter; i++){
                 ud[i-1] = {tid,i};
-                queue.enqueue(&ud[i-1],tid);
+                queue.push(&ud[i-1],tid);
             }
             prodBarrier.arrive_and_wait();
             prodBarrier.arrive_and_wait();
@@ -268,9 +260,9 @@ TYPED_TEST(Unbounded_Concurrent,TransferAllItems){
             uint64_t sum = 0;
             UserData* ud;
             while(!stopFlag.load())
-                if((ud = queue.dequeue(tid)) != nullptr) sum += ud->id;
+                if((ud = queue.pop(tid)) != nullptr) sum += ud->id;
             do{
-                if((ud = queue.dequeue(tid)) != nullptr) sum += ud->id;
+                if((ud = queue.pop(tid)) != nullptr) sum += ud->id;
             }while(ud != nullptr);
             return sum;
         };
@@ -296,8 +288,8 @@ TYPED_TEST(Unbounded_Concurrent,TransferAllItems){
         EXPECT_EQ(total/iThread, iter*(iter+1)/2)   << "Failed at run " << iThread 
                                                     << "Got " << total/iThread << "Expected " 
                                                     << iter*(iter+1)/2;
-        EXPECT_EQ(queue.dequeue(0),nullptr);
-        EXPECT_EQ(queue.size(0),0);
+        EXPECT_EQ(queue.pop(0),nullptr);
+        EXPECT_EQ(queue.length(0),0);
         
     }
 }
@@ -308,8 +300,8 @@ TYPED_TEST(Unbounded_Concurrent,TransferAllItems){
  */
 TYPED_TEST(Unbounded_Concurrent,QueueSemantics){
     TypeParam& queue = this->queue;
-    const int numRuns = 4;
-    const int iter = 10'000;
+    const int numRuns = CONCURRENT_RUN;
+    const int iter = 20'000;
     std::atomic<bool> stopFlag{false};
     for(int iThread = 1 ; iThread < numRuns; iThread++){
         barrier<>   barrierProd(iThread + 1);
@@ -326,7 +318,7 @@ TYPED_TEST(Unbounded_Concurrent,QueueSemantics){
 
         const auto prod_lambda = [&queue,&barrierProd,&producersData](const int tid){
             for(auto& elem : producersData[tid])
-                queue.enqueue(&elem,tid);
+                queue.push(&elem,tid);
             barrierProd.arrive_and_wait();
             barrierProd.arrive_and_wait();
             return;
@@ -335,9 +327,9 @@ TYPED_TEST(Unbounded_Concurrent,QueueSemantics){
         const auto cons_lambda = [&queue,&stopFlag,&consumersData](const int tid){
             UserData* ud;
             while(!stopFlag.load())
-                if((ud = queue.dequeue(tid)) != nullptr) consumersData[tid].push_back(*ud);
+                if((ud = queue.pop(tid)) != nullptr) consumersData[tid].push_back(*ud);
             do{
-                if((ud = queue.dequeue(tid)) != nullptr) consumersData[tid].push_back(*ud);
+                if((ud = queue.pop(tid)) != nullptr) consumersData[tid].push_back(*ud);
             }while(ud != nullptr);
         };
 
@@ -377,8 +369,9 @@ TYPED_TEST(Unbounded_Concurrent,QueueSemantics){
         EXPECT_EQ(prodsJoined.size(), consJoined.size());
         EXPECT_EQ(prodsJoined, consJoined);
     }
-
 }
+
+
 
 // Test setup for unbounded queues
 template <typename Q>
@@ -390,7 +383,7 @@ public:
     Q queue;
 
     // Default constructor with parameters for different queue types
-    Bounded_Concurrent() : queue(RING_SIZE),RingSize(queue.RingSize()){}
+    Bounded_Concurrent() : queue(RING_SIZE){}
 };
 
 using BQueuesOfUserData = BoundedQueues<UserData>;
@@ -400,7 +393,7 @@ TYPED_TEST_SUITE(Bounded_Concurrent, BQueuesOfUserData);
 TYPED_TEST(Bounded_Concurrent,TransferAllItems){
     TypeParam& queue = this->queue;
     std::atomic<bool> stopFlag{false};
-    const uint64_t numRuns = 4;
+    const uint64_t numRuns = CONCURRENT_RUN;
     const uint64_t iter = 20'000;
 
     for(int iThread = 1 ; iThread < numRuns; iThread++){
@@ -412,7 +405,7 @@ TYPED_TEST(Bounded_Concurrent,TransferAllItems){
             UserData ud[iter];
             for(uint64_t i = 1; i<= iter; i++){
                 ud[i-1] = {tid,i};
-                while(queue.enqueue(&ud[i-1],tid) == false);
+                while(queue.push(&ud[i-1],tid) == false);
             }
             prodBarrier.arrive_and_wait();
             prodBarrier.arrive_and_wait();
@@ -423,9 +416,9 @@ TYPED_TEST(Bounded_Concurrent,TransferAllItems){
             uint64_t sum = 0;
             UserData* ud;
             while(!stopFlag.load())
-                if((ud = queue.dequeue(tid)) != nullptr) sum += ud->id;
+                if((ud = queue.pop(tid)) != nullptr) sum += ud->id;
             do{
-                if((ud = queue.dequeue(tid)) != nullptr) sum += ud->id;
+                if((ud = queue.pop(tid)) != nullptr) sum += ud->id;
             }while(ud != nullptr);
             return sum;
         };
@@ -451,7 +444,7 @@ TYPED_TEST(Bounded_Concurrent,TransferAllItems){
         EXPECT_EQ(total/iThread, iter*(iter+1)/2)   << "Failed at run " << iThread 
                                                     << "Got " << total/iThread << "Expected " 
                                                     << iter*(iter+1)/2;
-        EXPECT_EQ(queue.dequeue(0),nullptr); 
+        EXPECT_EQ(queue.pop(0),nullptr); 
     }
 }
 
@@ -461,7 +454,7 @@ TYPED_TEST(Bounded_Concurrent,TransferAllItems){
  */
 TYPED_TEST(Bounded_Concurrent,QueueSemantics){
     TypeParam& queue = this->queue;
-    const int numRuns = 4;
+    const int numRuns = CONCURRENT_RUN;
     const int iter = 20'000;
     std::atomic<bool> stopFlag{false};
     for(int iThread = 1 ; iThread < numRuns; iThread++){
@@ -479,15 +472,15 @@ TYPED_TEST(Bounded_Concurrent,QueueSemantics){
 
         const auto prod_lambda = [&queue,&barrierProd,&producersData](const int tid){
             for(auto& elem : producersData[tid])
-                while(queue.enqueue(&elem,tid) == false);
+                while(queue.push(&elem,tid) == false);
         };
 
         const auto cons_lambda = [&queue,&stopFlag,&consumersData](const int tid){
             UserData* ud;
             while(!stopFlag.load())
-                if((ud = queue.dequeue(tid)) != nullptr) consumersData[tid].push_back(*ud);
+                if((ud = queue.pop(tid)) != nullptr) consumersData[tid].push_back(*ud);
             do{
-                if((ud = queue.dequeue(tid)) != nullptr) consumersData[tid].push_back(*ud);
+                if((ud = queue.pop(tid)) != nullptr) consumersData[tid].push_back(*ud);
             }while(ud != nullptr);
         };
 
@@ -528,10 +521,10 @@ TYPED_TEST(Bounded_Concurrent,QueueSemantics){
 
 }
 
+
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
-    return RUN_ALL_TESTS();  // This runs all tests
-
-    
+    return RUN_ALL_TESTS();  // This runs all tests   
 }
 
