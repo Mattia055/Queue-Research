@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD 20)  # Use C++20 standard
 set(CMAKE_BUILD_TYPE Debug)
 
 # Header files
-set(INCLUDE_DIRS
+set(HEADER_DIRS
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/include/benchmark
     ${CMAKE_SOURCE_DIR}/include/queues
@@ -19,22 +19,21 @@ find_library(NUMA_LIBRARY numa)
 find_path(NUMA_INCLUDE_DIR numa.h)
 
 # Source files for the main executables
-set(MAIN_SRC
+set(SOURCE_DIR
     src/main.cpp 
     src/utils/AdditionalWork.cpp
+    src/benchmark/MemoryBenchmark.cpp
 )
 
 # Create executables
-add_executable(.memoryManager src/benchmark/MemoryMonitor.cpp)
-add_executable(paddedMain ${MAIN_SRC})
-add_executable(unpaddedMain ${MAIN_SRC})
-add_executable(fsanMain ${MAIN_SRC})
+add_executable(paddedMain ${SOURCE_DIR})
+add_executable(unpaddedMain ${SOURCE_DIR})
+add_executable(fsanMain ${SOURCE_DIR})
 
 # Include directories for all executables
-target_include_directories(.memoryManager PRIVATE ${INCLUDE_DIRS})
-target_include_directories(paddedMain     PRIVATE ${INCLUDE_DIRS})
-target_include_directories(unpaddedMain   PRIVATE ${INCLUDE_DIRS})
-target_include_directories(fsanMain       PRIVATE ${INCLUDE_DIRS})
+target_include_directories(paddedMain     PRIVATE ${HEADER_DIRS})
+target_include_directories(unpaddedMain   PRIVATE ${HEADER_DIRS})
+target_include_directories(fsanMain       PRIVATE ${HEADER_DIRS})
 
 # Compile options
 target_compile_options(paddedMain   PUBLIC -O3)
@@ -42,7 +41,6 @@ target_compile_options(fsanMain PRIVATE -fsanitize=address -O3 PUBLIC -g)
 target_link_libraries(fsanMain  PRIVATE -fsanitize=address)
 
 target_compile_options(unpaddedMain   PUBLIC -O3)
-target_compile_options(.memoryManager PUBLIC -O3)
 
 # Compile definitions
 target_compile_definitions(unpaddedMain PUBLIC NO_PADDING)
@@ -66,8 +64,8 @@ set(GTEST_DIR ${CMAKE_SOURCE_DIR}/include/googletest/googletest/include)
 
 add_executable(testCases_pow2 src/test/queueTestCases.cpp)
 add_executable(testCases src/test/queueTestCases.cpp)
-target_include_directories(testCases PRIVATE ${INCLUDE_DIRS} ${GTEST_DIR})
-target_include_directories(testCases_pow2 PRIVATE ${INCLUDE_DIRS} ${GTEST_DIR})
+target_include_directories(testCases PRIVATE ${HEADER_DIRS} ${GTEST_DIR})
+target_include_directories(testCases_pow2 PRIVATE ${HEADER_DIRS} ${GTEST_DIR})
 
 # if(NUMA_LIBRARY AND NUMA_INCLUDE_DIR) # to ensure that test can run with/without NUMA
 #   target_link_libraries(testCases gtest gtest_main pthread numa)
@@ -109,7 +107,7 @@ add_test(NAME test_pow2 COMMAND testCases_pow2)
 # target_link_libraries(testCases PRIVATE GTest::gtest GTest::gmock pthread -fsanitize=address)
 
 # # Include directories for the test executable
-# target_include_directories(testCases PRIVATE ${INCLUDE_DIRS} ${gtest_SOURCE_DIR}/googletest/include)
+# target_include_directories(testCases PRIVATE ${HEADER_DIRS} ${gtest_SOURCE_DIR}/googletest/include)
 
 # # Enable testing
 # enable_testing()

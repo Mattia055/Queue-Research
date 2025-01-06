@@ -13,7 +13,7 @@
 #include "ThreadGroup.hpp"      //  for thread management
 #include "Stats.hpp"            //  for average and stddev computation
 #include "AdditionalWork.hpp"   //  Additional Work by threads
-#include "Format.hpp"
+// #include "Format.hpp"
 #include "QueueTypeSet.hpp"
 
 namespace bench {
@@ -49,7 +49,7 @@ public:
     }
 
     template<template<typename> typename Q>
-    void EnqueueDequeue(const size_t IterNum, const size_t numRuns, const std::string fileName = ""){
+    void run(const size_t IterNum, const size_t numRuns, const std::string fileName = ""){
         auto res = __EnqDeqBenchmark<Q>(IterNum,numRuns);
         Stats<long double> sts = stats(res.begin(),res.end());  //Average and Stddev over all runs
 
@@ -209,19 +209,19 @@ public:
     /*
         I should be able to reduce this interface to a standard format like a std::map
     */
-    static void runSeries   (Format format){    //DEBUG: look at earlier comment Do it later
-        //here i have to integrate the json object handling for the format
-        for(string q : format.queueFilter){
-            Queues::foreach([&format,&q]<template <typename> typename Q>() {
-                string queue = Q<int>::className(false);
-                    if(q == queue){
-                        runSeries<Q>(   format.path,
-                                        format.threads,
-                                        format.sizes,format.additionalWork,format.warmup,format.iterations,format.runs,format.args);
-                    }
-            });
-        }
-    }
+    // static void runSeries   (Format format){    //DEBUG: look at earlier comment Do it later
+    //     //here i have to integrate the json object handling for the format
+    //     for(string q : format.queueFilter){
+    //         Queues::foreach([&format,&q]<template <typename> typename Q>() {
+    //             string queue = Q<int>::className(false);
+    //                 if(q == queue){
+    //                     runSeries<Q>(   format.path,
+    //                                     format.threads,
+    //                                     format.sizes,format.additionalWork,format.warmup,format.iterations,format.runs,format.args);
+    //                 }
+    //         });
+    //     }
+    // }
 
     // EXPERIMENTAL_CODE
     // struct Result {

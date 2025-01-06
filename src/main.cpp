@@ -9,14 +9,20 @@
 #include "SymmetricBenchmark.hpp"
 #include <chrono>
 #include "PairsBenchmark.hpp"
+#include "MemoryBenchmark.hpp"
 
 int main(void){
     //LMTQueue<int> queue(128, 128);
     bench::Benchmark::Arguments args(true,true,false);
     // bench::PairsBenchmark bench(1,1,0.0,false,1024,1000000,args);
     // bench.ProducerConsumer<LCRQueue>(std::chrono::seconds{5}, 10);
-    bench::SymmetricBenchmark bench(6,0.0,1024*8,100000,args);
-    bench.EnqueueDequeue<BoundedMTQueue>(1000000,10);
+    // bench::SymmetricBenchmark bench(6,0.0,1024*8,100000,args);
+    // bench.EnqueueDequeue<BoundedMTQueue>(1000000,10);
+    bench::MemoryBenchmark::MemoryControl memFlags(10000,100ms,100,100ms);
+    memFlags.producers(100ms,100ms,100ms);
+    memFlags.consumers(100ms,100ms,100ms);
+    bench::MemoryBenchmark bench(1,1,0.0,false,1024,args,memFlags);
+    bench.MemoryRun<FAAQueue>(50s, 500ms,"test.csv");
     
 }
 
